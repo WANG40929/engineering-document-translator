@@ -89,7 +89,7 @@ class TranslatorWindow(QMainWindow):
         title = QLabel("工程文档智能翻译器"); title.setObjectName("title")
         subtitle = QLabel("保留原有版式 · 仅处理文字层 · 适合工程图纸与技术文件"); subtitle.setObjectName("subtitle")
         title_box.addWidget(title); title_box.addWidget(subtitle)
-        version = QLabel("v0.1.5"); version.setObjectName("versionBadge")
+        version = QLabel("v1.0.0"); version.setObjectName("versionBadge")
         heading.addWidget(icon_label); heading.addLayout(title_box); heading.addStretch(); heading.addWidget(version); layout.addLayout(heading)
 
         panel = QFrame(); panel.setObjectName("panel"); grid = QGridLayout(panel); grid.setHorizontalSpacing(12); grid.setVerticalSpacing(10); grid.setContentsMargins(16, 14, 16, 14)

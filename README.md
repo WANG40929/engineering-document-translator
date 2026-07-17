@@ -57,10 +57,14 @@ python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
 
 ## 版本记录
 
-### 0.1.5
+### 1.0.0（首个正式大版本）
 
 - “纯目标语言”改为默认不勾选；升级时执行一次配置迁移，之后仍会记住用户自己的选择。
 - 增加GitHub发布忽略规则，排除API凭据、本机配置、缓存、构建依赖和生成文件。
+
+## 发布与后续更新
+
+本GitHub仓库是项目的正式发布地址。后续功能、修复、源码和Windows EXE均在此仓库持续更新，并使用语义化版本号和GitHub Releases发布。
 
 ### 0.1.4
 
@@ -148,3 +152,7 @@ python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
 ### License
 
 This project is distributed under AGPL-3.0-or-later because the current PDF engine, PyMuPDF, is AGPL/commercial dual-licensed. Closed-source commercial distribution requires an appropriate commercial license or a replacement PDF engine. The architecture was informed by public design ideas from BabelDOC and PDFMathTranslate; their source code was not copied.
+
+### Releases and future updates
+
+This GitHub repository is the canonical home of the project. Future features, fixes, source updates, and Windows executables will be published here using semantic versioning and GitHub Releases.
