@@ -1,4 +1,8 @@
-# 工程文档智能翻译器
+# 工程文档智能翻译器 / Engineering Document Translator
+
+[中文](#中文说明) · [English](#english)
+
+## 中文说明
 
 面向工程手册、图纸、清单和表格的 Windows 桌面批量翻译程序。调用 DeepSeek API，源文件永不覆盖，输出保持相同格式并追加目标语言后缀，例如 `manual.pdf` → `manual_ZH.pdf`。
 
@@ -14,7 +18,7 @@
 - API Key：在当前 Windows 用户账户下用 DPAPI 加密保存，不以明文写入配置文件。
 - 文件队列：已完成文件保留在列表中但不会重复处理；可选择“重新处理所选”手动重跑。
 - 拖放导入：支持把单个文件、多个文件或整个文件夹直接拖入文件列表。
-- 纯目标语言：双语字段会合并翻译，不再默认保留斜杠后的英文对照。
+- 纯目标语言：可选地把双语字段合并为单一目标语言；此选项默认不勾选。
 - 质量复核：自动检查残留源语言，对物料名称和普通技术词执行一次针对性复核。
 - 缓存控制：翻译规则升级后自动启用新缓存，也可勾选“忽略旧缓存”强制重译。
 
@@ -86,3 +90,61 @@ python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
 ## 开源组件与许可
 
 本项目使用 PyMuPDF、python-docx 和 openpyxl。PyMuPDF 采用 AGPL 或商业双重许可，因此当前原型适合个人使用和源码可见的内部试用。若要闭源商业分发，应购买相应商业许可或更换 PDF 引擎。架构参考了 BabelDOC 与 PDFMathTranslate 的公开设计思路，没有直接复制其源代码。
+
+---
+
+## English
+
+A Windows desktop batch translator for engineering manuals, drawings, packing lists, and spreadsheets. It uses the DeepSeek API, never overwrites source files, preserves the original file type and layout as far as practical, and adds a target-language suffix such as `manual.pdf` → `manual_ZH.pdf`.
+
+### Supported formats and features
+
+- **PDF:** Translates existing text layers only. Pages without a text layer are kept unchanged; OCR is intentionally not performed. Images, vector drawings, page sizes, and page counts are preserved.
+- **DOCX:** Translates body text, tables, headers, and footers using full-paragraph context while preserving paragraph, table, and primary character formatting where possible.
+- **XLSX/XLSM:** Translates string cells only; formulas, numeric values, formatting, and workbook structure remain unchanged.
+- **CSV/TSV:** Preserves delimiters and common encodings.
+- **DOC:** Uses the locally installed Microsoft Word to convert, translate, and save legacy `.doc` files.
+- **Technical-token protection:** Drawing numbers, KKS identifiers, standards, dimensions, units, URLs, and similar tokens are protected before API requests.
+- **Cost control:** Batched API calls, SQLite translation cache, duplicate-text reuse, and duplicate-file hash reuse.
+- **Cache limit:** The cache is capped at 100 MB. Oldest entries are removed and the database is compacted to about 90 MB when the limit is exceeded.
+- **API-key security:** The key is encrypted with Windows DPAPI for the current Windows user and is never stored as plain text in the configuration file.
+- **File queue and drag-and-drop:** Completed files are not processed again unless explicitly requeued. Files and folders can be dropped directly into the window.
+- **Target-only mode:** Optionally merges bilingual fields into the target language only. This option is off by default.
+- **Quality review:** Optionally performs a second pass on likely untranslated material names and ordinary technical terms.
+
+### Installation and use
+
+Install Python 3.10 or later, then run:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m translator_app
+```
+
+You can also double-click `run.bat`. Enter a DeepSeek API key, add files or folders, and start translation. If the output directory is left blank, translated files are written next to the originals. A JSON batch report is generated after processing.
+
+Glossaries may be CSV, TSV, TXT, or XLSX files. The first two columns must contain the source and target terms:
+
+```csv
+lube oil,润滑油
+bearing pedestal,轴承座
+```
+
+Command-line example:
+
+```powershell
+$env:DEEPSEEK_API_KEY="your-key"
+python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
+```
+
+### Important limitations
+
+- PDF translation removes original text glyphs and writes translated text into the original text boxes. Dense title blocks or long translations may require reduced font sizes.
+- Outlined PDF text and text inside scanned images are intentionally not translated.
+- DOCX text boxes, SmartArt, and embedded-object text are not currently processed.
+- Legacy `.doc` processing requires Microsoft Word.
+- Validate terminology and layout on a small sample before processing very large manuals.
+
+### License
+
+This project is distributed under AGPL-3.0-or-later because the current PDF engine, PyMuPDF, is AGPL/commercial dual-licensed. Closed-source commercial distribution requires an appropriate commercial license or a replacement PDF engine. The architecture was informed by public design ideas from BabelDOC and PDFMathTranslate; their source code was not copied.
