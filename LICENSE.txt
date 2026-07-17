@@ -1,0 +1,9 @@
+Universal Document Translator is licensed under the GNU Affero General Public
+License, version 3 or (at your option) any later version (AGPL-3.0-or-later).
+
+License text: https://www.gnu.org/licenses/agpl-3.0.txt
+
+Copyright (c) 2026. This software is provided without warranty. The AGPL license
+choice is required by the PDF engine used in this prototype. A separately
+licensed PDF engine may be substituted for a closed-source commercial edition.
+

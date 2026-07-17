@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# Local environments and bundled build dependencies
+.venv/
+venv/
+.qt-deps/
+.build-deps/
+tcl_debug/
+tcl_min/
+
+# Build and generated packages
+build/
+dist/
+release_source/
+final_exe_test/
+v011_exe_test/
+exe_test_data/
+gui_test_data/
+ui_fix_test_data/
+*.exe
+*.zip
+
+# Generated document QA artifacts
+*.pdf
+*_page*.png
+title_fix_test.png
+translation_report_*.json
+
+# Local credentials, configuration and cache
+*.key
+config.json
+translations.sqlite3*
+.env
+.env.*
+
+# Image-generation intermediate files
+translator_app/assets/*chroma*.png

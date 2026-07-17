@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "universal-document-translator"
+version = "0.1.5"
+description = "Layout-preserving engineering document translator using DeepSeek"
+requires-python = ">=3.10"
+dependencies = ["PyMuPDF>=1.26,<2", "python-docx>=1.1,<2", "openpyxl>=3.1,<4", "PySide6-Essentials>=6.8,<7"]
+
+[project.gui-scripts]
+engineering-document-translator = "translator_app.qt_gui:main"
+
+[project.scripts]
+udt-translate = "translator_app.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["translator_app*"]
+
+[tool.setuptools.package-data]
+translator_app = ["assets/*.png", "assets/*.ico"]
