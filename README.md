@@ -1,43 +1,91 @@
-# 工程文档智能翻译器 / Engineering Document Translator
+<p align="center">
+  <img src="translator_app/assets/app_icon.png" width="104" alt="Engineering Document Translator icon">
+</p>
 
-[中文](#中文说明) · [English](#english)
+<h1 align="center">工程文档智能翻译器</h1>
+<h3 align="center">Engineering Document Translator</h3>
 
-## 中文说明
+<p align="center">
+  保留版式、保护工程编号，批量翻译 PDF、Word 和 Excel。<br>
+  Translate engineering PDFs, Word files, and spreadsheets while preserving layout and technical identifiers.
+</p>
 
-面向工程手册、图纸、清单和表格的 Windows 桌面批量翻译程序。调用 DeepSeek API，源文件永不覆盖，输出保持相同格式并追加目标语言后缀，例如 `manual.pdf` → `manual_ZH.pdf`。
+<p align="center">
+  <a href="https://github.com/WANG40929/engineering-document-translator/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/WANG40929/engineering-document-translator?style=flat-square&color=F47A3C"></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-23262B?style=flat-square">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="DeepSeek" src="https://img.shields.io/badge/DeepSeek-V4-4D6BFE?style=flat-square">
+  <a href="LICENSE.txt"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-23262B?style=flat-square"></a>
+</p>
 
-## 当前支持
+<p align="center">
+  <strong><a href="https://github.com/WANG40929/engineering-document-translator/releases/latest">下载 Windows 正式版 / Download for Windows</a></strong>
+  · <a href="#中文">中文</a>
+  · <a href="#english">English</a>
+  · <a href="CHANGELOG.md">更新日志 / Changelog</a>
+</p>
 
-- PDF：只翻译已有文字层；没有文字层的页面原样保留，不进行 OCR。图片、矢量线条、页面尺寸和页数保持不变。
-- DOCX：翻译正文、表格、页眉和页脚的普通文本；按完整段落理解上下文，尽量保留段落、表格和主要字符样式。
-- XLSX/XLSM：只翻译字符串单元格，公式、数值、格式和工作表结构不变。
-- CSV/TSV：保留原分隔符和常见编码。
-- DOC：借助本机 Microsoft Word 转换后翻译，并保存回 `.doc`。
-- 技术保护：图号、KKS、标准号、尺寸、单位、网址等在请求前以占位符保护。
-- 成本控制：SQLite 本地翻译缓存、批量请求、批次内重复文件哈希复用。
-- API Key：在当前 Windows 用户账户下用 DPAPI 加密保存，不以明文写入配置文件。
-- 文件队列：已完成文件保留在列表中但不会重复处理；可选择“重新处理所选”手动重跑。
-- 拖放导入：支持把单个文件、多个文件或整个文件夹直接拖入文件列表。
-- 纯目标语言：可选地把双语字段合并为单一目标语言；此选项默认不勾选。
-- 质量复核：自动检查残留源语言，对物料名称和普通技术词执行一次针对性复核。
-- 缓存控制：翻译规则升级后自动启用新缓存，也可勾选“忽略旧缓存”强制重译。
+![应用界面 / Application screenshot](docs/app-screenshot.png)
 
-## 使用
+---
 
-安装 Python 3.10 以上版本后，在项目目录运行：
+<a id="中文"></a>
 
-```powershell
-python -m pip install -r requirements.txt
-python -m translator_app
-```
+## 中文
 
-也可双击 `run.bat`。在界面中输入 DeepSeek API Key、添加文件或文件夹，然后开始翻译。输出目录留空时，译文放在源文件旁；批处理报告为 JSON。
+### 为什么做这个项目？
 
-术语表支持 CSV、TSV、TXT 或 XLSX，前两列依次为“源术语、目标术语”，例如：
+普通翻译工具往往只关心文字，却容易破坏工程文档的表格、图纸、页眉页脚和技术编号。本项目专门面向工程手册、图纸、装箱单、设备清单等文件：只处理已有文字层，尽量保留原文件结构，并在发送API请求前保护图号、KKS、标准号、尺寸和单位。
+
+### 三步开始使用
+
+1. 从 [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest) 下载最新版 Windows EXE。
+2. 启动软件，填写自己的 DeepSeek API Key，并选择目标语言。
+3. 拖入文件或文件夹，点击“开始翻译”。源文件不会被覆盖，译文会自动添加语言后缀。
+
+> 默认模型是 `deepseek-v4-flash`，适合快速、低成本的批量翻译；复杂内容可切换到 `deepseek-v4-pro`。
+
+### 支持的文件
+
+| 格式 | 处理方式 | 保留内容 |
+|---|---|---|
+| PDF | 仅翻译已有文字层，不执行 OCR | 图片、矢量线条、页面尺寸和页数 |
+| DOCX | 按完整段落翻译正文、表格、页眉和页脚 | 段落、表格和主要字符样式 |
+| XLSX / XLSM | 只翻译字符串单元格 | 公式、数值、样式和工作表结构 |
+| CSV / TSV | 按原编码和分隔符读写 | 行列结构和分隔符 |
+| DOC | 通过本机 Microsoft Word 转换并回存 | 原 `.doc` 格式；需要安装 Word |
+
+### 核心功能
+
+- **保留版式：** 不把文档粗暴转换成纯文本。
+- **技术编号保护：** 图号、物料号、KKS、标准号、尺寸、单位、网址等使用占位符保护。
+- **文件队列：** 支持多文件、文件夹和拖放；已完成文件不会自动重复处理。
+- **翻译质量检查：** 可自动复核疑似未翻译的物料名称和普通技术词。
+- **术语表：** 支持 CSV、TSV、TXT、XLSX；选择后会记住路径，并在后续文件中继续使用。
+- **纯目标语言：** 可选地把双语字段合并成单一目标语言，默认不勾选。
+- **缓存与成本控制：** 相同文字跨文件复用；缓存上限 100 MB，超限后自动删除最旧记录并压缩至约 90 MB。
+- **密钥安全：** API Key 使用 Windows DPAPI 加密，只能由当前 Windows 用户读取，不会写入项目或报告。
+
+### 术语表格式
+
+前两列分别填写“源术语”和“目标术语”：
 
 ```csv
 lube oil,润滑油
 bearing pedestal,轴承座
+```
+
+当前版本使用的是**人工确认的术语表**。自动抽取并审核术语库仍在规划中，缓存不能替代术语库。
+
+### 从源码运行
+
+需要 Python 3.10 或更高版本：
+
+```powershell
+git clone https://github.com/WANG40929/engineering-document-translator.git
+cd engineering-document-translator
+python -m pip install -r requirements.txt
+python -m translator_app
 ```
 
 命令行示例：
@@ -47,112 +95,112 @@ $env:DEEPSEEK_API_KEY="你的密钥"
 python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
 ```
 
-## 重要限制
+### 已知限制
 
-- PDF 采用“移除原文字字形并在原文字框写入译文”的方式。极密集图签或很长的中文译文可能需要缩小字体，报告会列出无法完全放入的文本框。
-- PDF 中转曲后的文字、扫描图片中的文字不会翻译，这正是“不处理无文字层页面”的设计要求。
-- DOCX 文本框、SmartArt 和嵌入对象中的文字暂未处理；宏文件会保留 VBA 项目，但建议先用副本验证。
-- `.doc` 依赖 Microsoft Word；未安装 Word 时该文件会失败，但不会影响同一批次的其他文件。
-- 请先用少量文件验证术语和版式，再处理数百页的大型手册。
+- 扫描图片、PDF转曲文字和没有文字层的页面不会翻译。
+- 很密集的 PDF 图签或过长译文可能需要缩小字体。
+- DOCX 文本框、SmartArt 和嵌入对象中的文字暂未处理。
+- 旧版 `.doc` 依赖 Microsoft Word。
+- 建议先用少量代表性文件验证术语和版式，再处理大型项目文件。
 
-## 版本记录
+### 下一步计划
 
-### 1.0.0（首个正式大版本）
+- [ ] 可审核、可复用的自动术语库
+- [ ] 可选 OCR 模块（保持默认不处理扫描页）
+- [ ] 更直观的翻译质量报告
+- [ ] Windows 安装包与自动更新提示
 
-- “纯目标语言”改为默认不勾选；升级时执行一次配置迁移，之后仍会记住用户自己的选择。
-- 增加GitHub发布忽略规则，排除API凭据、本机配置、缓存、构建依赖和生成文件。
-
-## 发布与后续更新
-
-本GitHub仓库是项目的正式发布地址。后续功能、修复、源码和Windows EXE均在此仓库持续更新，并使用语义化版本号和GitHub Releases发布。
-
-### 0.1.4
-
-- 默认模型更新为 `deepseek-v4-flash`，并提供 `deepseek-v4-pro` 选择。
-- 已保存的 `deepseek-chat` / `deepseek-reasoner` 配置会自动迁移，避免旧模型停用后请求失败。
-
-### 0.1.3
-
-- 主窗口启动时自动居中到当前使用的显示器。
-- 翻译缓存设置100 MB上限，超限后按最早写入顺序清理并压缩到约90 MB。
-- 更新为暖白、石墨灰与橙色点缀的简约程序图标，强化翻译识别属性。
-
-### 0.1.2
-
-- DOCX 从逐个文字片段翻译改为按完整段落翻译，改善双语字段和拆分文字的上下文。
-- 新增纯目标语言模式、残留源语言自动复核和忽略旧缓存选项。
-- 缓存键加入翻译规则和模型版本，旧的遗漏结果不会继续复用。
-- 优化窗口层级、留白、文件区和进度状态，加入新程序图标。
-
-### 0.1.1
-
-- 修复大字号 PDF 标题在译文写入失败后变成空白的问题。
-- 保持居中标题的对齐关系，并用安全试排逐级缩小字号。
-- 已完成文件不再随下一批新文件重复翻译。
-- 文件列表增加状态列、拖放导入和“重新处理所选”。
-
-## 开源组件与许可
-
-本项目使用 PyMuPDF、python-docx 和 openpyxl。PyMuPDF 采用 AGPL 或商业双重许可，因此当前原型适合个人使用和源码可见的内部试用。若要闭源商业分发，应购买相应商业许可或更换 PDF 引擎。架构参考了 BabelDOC 与 PDFMathTranslate 的公开设计思路，没有直接复制其源代码。
+如果这个项目对你有帮助，欢迎点一个 **Star**，或通过 [Issues](https://github.com/WANG40929/engineering-document-translator/issues) 提交样本文档类型、问题和建议。
 
 ---
 
+<a id="english"></a>
+
 ## English
 
-A Windows desktop batch translator for engineering manuals, drawings, packing lists, and spreadsheets. It uses the DeepSeek API, never overwrites source files, preserves the original file type and layout as far as practical, and adds a target-language suffix such as `manual.pdf` → `manual_ZH.pdf`.
+### Why this project?
 
-### Supported formats and features
+General-purpose translators focus on text and may damage tables, drawings, headers, footers, and technical identifiers. This application is built for engineering manuals, drawings, packing lists, and equipment schedules. It translates existing text layers only, preserves the document structure where practical, and protects drawing numbers, KKS identifiers, standards, dimensions, and units before sending text to the API.
 
-- **PDF:** Translates existing text layers only. Pages without a text layer are kept unchanged; OCR is intentionally not performed. Images, vector drawings, page sizes, and page counts are preserved.
-- **DOCX:** Translates body text, tables, headers, and footers using full-paragraph context while preserving paragraph, table, and primary character formatting where possible.
-- **XLSX/XLSM:** Translates string cells only; formulas, numeric values, formatting, and workbook structure remain unchanged.
-- **CSV/TSV:** Preserves delimiters and common encodings.
-- **DOC:** Uses the locally installed Microsoft Word to convert, translate, and save legacy `.doc` files.
-- **Technical-token protection:** Drawing numbers, KKS identifiers, standards, dimensions, units, URLs, and similar tokens are protected before API requests.
-- **Cost control:** Batched API calls, SQLite translation cache, duplicate-text reuse, and duplicate-file hash reuse.
-- **Cache limit:** The cache is capped at 100 MB. Oldest entries are removed and the database is compacted to about 90 MB when the limit is exceeded.
-- **API-key security:** The key is encrypted with Windows DPAPI for the current Windows user and is never stored as plain text in the configuration file.
-- **File queue and drag-and-drop:** Completed files are not processed again unless explicitly requeued. Files and folders can be dropped directly into the window.
-- **Target-only mode:** Optionally merges bilingual fields into the target language only. This option is off by default.
-- **Quality review:** Optionally performs a second pass on likely untranslated material names and ordinary technical terms.
+### Get started in three steps
 
-### Installation and use
+1. Download the latest Windows EXE from [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest).
+2. Start the application, enter your own DeepSeek API key, and select a target language.
+3. Drop files or folders into the window and click **Start Translation**. Source files are never overwritten; translated files receive a language suffix.
 
-Install Python 3.10 or later, then run:
+> `deepseek-v4-flash` is the default model for fast, cost-effective batch translation. Select `deepseek-v4-pro` for more demanding content.
 
-```powershell
-python -m pip install -r requirements.txt
-python -m translator_app
-```
+### Supported files
 
-You can also double-click `run.bat`. Enter a DeepSeek API key, add files or folders, and start translation. If the output directory is left blank, translated files are written next to the originals. A JSON batch report is generated after processing.
+| Format | Processing | Preserved content |
+|---|---|---|
+| PDF | Translates existing text layers only; no OCR | Images, vector drawings, page sizes, and page count |
+| DOCX | Translates body text, tables, headers, and footers with paragraph context | Paragraphs, tables, and primary character styles |
+| XLSX / XLSM | Translates string cells only | Formulas, values, styles, and workbook structure |
+| CSV / TSV | Reads and writes using the detected encoding and delimiter | Rows, columns, and delimiters |
+| DOC | Converts and saves through local Microsoft Word | Legacy `.doc` format; Word is required |
 
-Glossaries may be CSV, TSV, TXT, or XLSX files. The first two columns must contain the source and target terms:
+### Key features
+
+- **Layout preservation:** Documents are not flattened into plain text.
+- **Technical-token protection:** Drawing numbers, material IDs, KKS tags, standards, dimensions, units, and URLs are protected with placeholders.
+- **Batch queue:** Supports files, folders, and drag-and-drop. Completed files are not processed again automatically.
+- **Translation review:** Can retry likely untranslated material names and ordinary technical terms.
+- **Glossaries:** Supports CSV, TSV, TXT, and XLSX. The selected path is remembered and reused for later files.
+- **Target-only mode:** Optionally merges bilingual fields into the target language only. It is off by default.
+- **Cache and cost control:** Reuses identical text across files. The cache is capped at 100 MB and compacted to about 90 MB after removing the oldest entries.
+- **API-key security:** The key is encrypted with Windows DPAPI for the current user and is never written to the repository or reports.
+
+### Glossary format
+
+Use the first two columns for the source and target terms:
 
 ```csv
 lube oil,润滑油
 bearing pedestal,轴承座
 ```
 
-Command-line example:
+The current version uses **human-approved glossary files**. Automatic terminology extraction and review are planned; the translation cache is not a terminology database.
+
+### Run from source
+
+Python 3.10 or later is required:
+
+```powershell
+git clone https://github.com/WANG40929/engineering-document-translator.git
+cd engineering-document-translator
+python -m pip install -r requirements.txt
+python -m translator_app
+```
+
+CLI example:
 
 ```powershell
 $env:DEEPSEEK_API_KEY="your-key"
 python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
 ```
 
-### Important limitations
+### Known limitations
 
-- PDF translation removes original text glyphs and writes translated text into the original text boxes. Dense title blocks or long translations may require reduced font sizes.
-- Outlined PDF text and text inside scanned images are intentionally not translated.
-- DOCX text boxes, SmartArt, and embedded-object text are not currently processed.
-- Legacy `.doc` processing requires Microsoft Word.
-- Validate terminology and layout on a small sample before processing very large manuals.
+- Scanned images, outlined PDF text, and pages without a text layer are not translated.
+- Dense PDF title blocks or long translations may require smaller font sizes.
+- Text inside DOCX text boxes, SmartArt, and embedded objects is not currently processed.
+- Legacy `.doc` support requires Microsoft Word.
+- Validate terminology and layout with a representative sample before processing a large project.
 
-### License
+### Roadmap
 
-This project is distributed under AGPL-3.0-or-later because the current PDF engine, PyMuPDF, is AGPL/commercial dual-licensed. Closed-source commercial distribution requires an appropriate commercial license or a replacement PDF engine. The architecture was informed by public design ideas from BabelDOC and PDFMathTranslate; their source code was not copied.
+- [ ] Reviewable and reusable automatic terminology library
+- [ ] Optional OCR module while keeping scanned pages untouched by default
+- [ ] Clearer translation quality reports
+- [ ] Windows installer and update notifications
 
-### Releases and future updates
+If this project is useful, please consider giving it a **Star**. File-format examples, bug reports, and feature ideas are welcome in [Issues](https://github.com/WANG40929/engineering-document-translator/issues).
 
-This GitHub repository is the canonical home of the project. Future features, fixes, source updates, and Windows executables will be published here using semantic versioning and GitHub Releases.
+---
+
+## License / 许可
+
+AGPL-3.0-or-later. PyMuPDF is available under the AGPL or a commercial license. Closed-source commercial distribution requires an appropriate commercial license or a replacement PDF engine. See [LICENSE.txt](LICENSE.txt) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+本项目采用 AGPL-3.0-or-later。PyMuPDF 使用 AGPL / 商业双重许可；闭源商业分发需要购买相应商业许可或更换 PDF 引擎。
