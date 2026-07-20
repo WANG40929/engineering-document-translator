@@ -1,11 +1,13 @@
-# Prototype verification report
+# Version 1.1.0 verification report
 
-- Automated offline tests: 13 passed (including PDF/DOCX/XLSX/CSV, split-run DOCX context, cache deduplication and size trimming, model/config migration, token protection, and Windows DPAPI).
-- Real engineering sample: `KZ5001-MB-&MPB010-R-370022_-_0.pdf` processed offline with an identity translator.
-- PDF result: 6/6 pages retained, all page sizes equal, 335/335 vector drawing objects retained.
-- Visual check: rotated component-list page retained table geometry after Unicode font correction.
-- Packaged EXE: self-test launch returned exit code 0.
-- Queue check: a completed first file is excluded when a second file is added; only the pending file is returned.
-- Drag-and-drop check: dropped PDF and DOCX paths are added to the four-column status list.
+- Automated offline tests: 18 passed, covering PDF/DOCX/XLSX/CSV, cache trimming, model migration, DPAPI, incomplete-response recovery, recursive batch splitting, exact PDF failure progress, and queue failure behavior.
+- Long-document sample: `KZ5001-MBR10-&ADZ050-R-357315_-_0.pdf` processed offline with an identity translator.
+- Long PDF result: 67/67 pages completed, 1,652/1,652 text units processed, 0 warnings, and final progress 100%.
+- Visual PDF review: pages 1, 11, 46, and 67 rendered without clipped text, broken drawings, overlaps, or page-geometry changes.
+- UI smoke test: the PySide6 application started and exited normally in offscreen mode.
+- Packaged EXE: the 68.5 MB PyInstaller build launched successfully and exited through the built-in smoke-test timer.
+- UI visual review: the frameless main window and About page match the approved blue-and-white design, with readable Chinese fonts, the line-only header icon, per-file status, progress, ETA, and run-only Stop button.
+- UI state check: frameless flag, idle Stop visibility, and stop-request transition were verified programmatically.
+- Failure handling: incomplete DeepSeek responses preserve valid IDs and request only missing segments; full invalid batches split recursively instead of failing the entire document immediately.
 
-No DeepSeek API request was made during verification, so no user token was consumed.
+No live DeepSeek API request was made during verification, so no user token was consumed.

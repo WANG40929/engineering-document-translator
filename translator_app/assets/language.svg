@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 28 28">
+  <rect x="2" y="2" width="15" height="17" rx="2.5" fill="#1769e8"/>
+  <rect x="10" y="10" width="16" height="16" rx="2.5" fill="#1769e8" stroke="#fff" stroke-width="1"/>
+  <text x="9.5" y="15" fill="#fff" font-family="Arial" font-size="12" font-weight="700" text-anchor="middle">A</text>
+  <text x="18" y="22" fill="#fff" font-family="Microsoft YaHei UI, sans-serif" font-size="10" font-weight="700" text-anchor="middle">文</text>
+</svg>

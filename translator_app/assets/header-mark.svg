@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 112">
+  <g fill="none" stroke="#1769e8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Original app icon silhouette, recolored for the blue interface. -->
+    <path d="M62 15H31a7 7 0 0 0-7 7v66a7 7 0 0 0 7 7h30"/>
+    <path d="M62 15v15a7 7 0 0 0 7 7h16M62 15l23 22v24"/>
+    <path d="M59 70h27m-7-7 7 7-7 7"/>
+    <path d="M86 86H59m7-7-7 7 7 7"/>
+  </g>
+</svg>

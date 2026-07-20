@@ -5,7 +5,10 @@ a = Analysis(
     ['launcher.py'],
     pathex=['.qt-deps'],
     binaries=[],
-    datas=[('translator_app/assets/app_icon.png', 'translator_app/assets')],
+    datas=[
+        ('translator_app/assets/app_icon.png', 'translator_app/assets'),
+        ('translator_app/assets/*.svg', 'translator_app/assets'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

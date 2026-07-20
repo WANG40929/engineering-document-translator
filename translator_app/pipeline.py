@@ -49,9 +49,10 @@ class TranslationPipeline:
                 size_counts[source.stat().st_size] = size_counts.get(source.stat().st_size, 0) + 1
         completed_by_hash: dict[str, FileResult] = {}
         total = len(sources)
+        file_fractions = [0.0] * total
         for index, source in enumerate(sources):
             if progress:
-                progress(str(source), index / max(total, 1), f"准备处理 {index + 1}/{total}：{source.name}")
+                progress(str(source), sum(file_fractions) / max(total, 1), f"准备处理 {index + 1}/{total}：{source.name}")
             if not source.exists():
                 results.append(FileResult(str(source), status="failed", errors=["文件不存在"])); continue
             engine = self.engine_for(source)
@@ -66,18 +67,24 @@ class TranslationPipeline:
                 duplicate = FileResult(str(source), str(destination), "completed", "duplicate copy")
                 duplicate.warnings.append(f"与 {Path(previous.input_path).name} 内容相同，复用翻译结果，未调用 API")
                 results.append(duplicate)
+                file_fractions[index] = 1.0
                 continue
 
             def file_progress(_file, fraction, message):
+                file_fractions[index] = max(file_fractions[index], min(1.0, max(0.0, fraction)))
                 if progress:
-                    progress(str(source), (index + fraction) / max(total, 1), message)
+                    progress(str(source), sum(file_fractions) / max(total, 1), message)
 
             result = engine.translate(source, destination, translator, options, file_progress)
             results.append(result)
+            if result.status == "completed":
+                file_fractions[index] = 1.0
             if digest and result.status == "completed":
                 completed_by_hash[digest] = result
         if progress:
-            progress("", 1.0, "批处理完成")
+            fraction = sum(file_fractions) / max(total, 1) if total else 1.0
+            message = "批处理完成" if all(result.status == "completed" for result in results) else "处理结束，存在失败文件"
+            progress("", fraction, message)
         return results
 
 
@@ -102,4 +109,3 @@ def write_report(results: list[FileResult], output_dir: Path) -> Path:
 def collect_files(path: Path, recursive: bool = True) -> list[Path]:
     iterator = path.rglob("*") if recursive else path.glob("*")
     return sorted(p for p in iterator if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS and not p.stem.endswith(("_ZH", "_EN", "_RU")))
-

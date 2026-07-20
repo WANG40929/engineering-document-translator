@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="translator_app/assets/app_icon.png" width="104" alt="Engineering Document Translator icon">
+  <img src="translator_app/assets/app_icon.png" width="104" alt="Document Translator icon">
 </p>
 
-<h1 align="center">工程文档智能翻译器</h1>
-<h3 align="center">Engineering Document Translator</h3>
+<h1 align="center">文档智能翻译器</h1>
+<h3 align="center">Document Translator</h3>
 
 <p align="center">
-  保留版式、保护工程编号，批量翻译 PDF、Word 和 Excel。<br>
-  Translate engineering PDFs, Word files, and spreadsheets while preserving layout and technical identifiers.
+  保留版式、保护技术编号，批量翻译 PDF、Word、Excel 和 CSV 等文档。<br>
+  Translate PDFs, Word files, spreadsheets, and CSV files while preserving layout and technical identifiers.
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@
 ### 三步开始使用
 
 1. 从 [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest) 下载最新版 Windows EXE。
-2. 启动软件，填写自己的 DeepSeek API Key，并选择目标语言。
+2. 启动软件，在“设置”中填写自己的 DeepSeek API Key，并选择目标语言。
 3. 拖入文件或文件夹，点击“开始翻译”。源文件不会被覆盖，译文会自动添加语言后缀。
 
 > 默认模型是 `deepseek-v4-flash`，适合快速、低成本的批量翻译；复杂内容可切换到 `deepseek-v4-pro`。
@@ -60,6 +60,9 @@
 - **保留版式：** 不把文档粗暴转换成纯文本。
 - **技术编号保护：** 图号、物料号、KKS、标准号、尺寸、单位、网址等使用占位符保护。
 - **文件队列：** 支持多文件、文件夹和拖放；已完成文件不会自动重复处理。
+- **长文档容错：** 接口漏掉部分段落时只补译缺失内容，必要时自动拆小批次，不让单次不完整返回报废整份文件。
+- **真实进度：** 按文字段落计算进度，显示当前页、已用时间和动态预计剩余时间；失败时停在实际位置。
+- **任务控制：** 翻译运行时可请求停止；停止按钮在空闲状态自动隐藏。
 - **翻译质量检查：** 可自动复核疑似未翻译的物料名称和普通技术词。
 - **术语表：** 支持 CSV、TSV、TXT、XLSX；选择后会记住路径，并在后续文件中继续使用。
 - **纯目标语言：** 可选地把双语字段合并成单一目标语言，默认不勾选。
@@ -125,7 +128,7 @@ General-purpose translators focus on text and may damage tables, drawings, heade
 ### Get started in three steps
 
 1. Download the latest Windows EXE from [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest).
-2. Start the application, enter your own DeepSeek API key, and select a target language.
+2. Start the application, enter your own DeepSeek API key under **Settings**, and select a target language.
 3. Drop files or folders into the window and click **Start Translation**. Source files are never overwritten; translated files receive a language suffix.
 
 > `deepseek-v4-flash` is the default model for fast, cost-effective batch translation. Select `deepseek-v4-pro` for more demanding content.
@@ -145,6 +148,8 @@ General-purpose translators focus on text and may damage tables, drawings, heade
 - **Layout preservation:** Documents are not flattened into plain text.
 - **Technical-token protection:** Drawing numbers, material IDs, KKS tags, standards, dimensions, units, and URLs are protected with placeholders.
 - **Batch queue:** Supports files, folders, and drag-and-drop. Completed files are not processed again automatically.
+- **Long-document recovery:** Repairs only omitted segments and recursively splits invalid batches instead of failing the whole file.
+- **Real progress:** Tracks text units, current PDF page, elapsed time, and a dynamic ETA without falsely showing 100% after failure.
 - **Translation review:** Can retry likely untranslated material names and ordinary technical terms.
 - **Glossaries:** Supports CSV, TSV, TXT, and XLSX. The selected path is remembered and reused for later files.
 - **Target-only mode:** Optionally merges bilingual fields into the target language only. It is off by default.
