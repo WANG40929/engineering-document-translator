@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import csv
+import json
 import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import fitz
 from docx import Document
@@ -12,12 +14,13 @@ from openpyxl import Workbook, load_workbook
 
 from translator_app.cache import TranslationCache
 from translator_app.config import ConfigStore
-from translator_app.deepseek import DeepSeekTranslator, IdentityTranslator
+from translator_app.deepseek import DeepSeekError, DeepSeekTranslator, IdentityTranslator, IncompleteResponseError
 from translator_app.engines.csv_engine import CsvEngine
 from translator_app.engines.docx_engine import DocxEngine
 from translator_app.engines.pdf_engine import PdfEngine
 from translator_app.engines.xlsx_engine import XlsxEngine
 from translator_app.models import TranslationOptions
+from translator_app.pipeline import TranslationPipeline
 from translator_app.secret_store import SecretStore
 from translator_app.text_utils import is_translatable, protect_text
 
@@ -60,6 +63,60 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(translator.calls, 1)
         translator.translate_many(["Bearing", "Pump"])
         self.assertEqual(translator.calls, 1)
+
+    def test_api_repairs_only_missing_segments(self):
+        class PartialDeepSeek(DeepSeekTranslator):
+            calls = []
+
+            def _request(inner, items, review=False):
+                ids = [int(item["id"]) for item in items]
+                inner.calls.append(ids)
+                if len(inner.calls) == 1:
+                    missing = set(range(11, 22))
+                    partial = {item_id: f"译文{item_id}" for item_id in ids if item_id not in missing}
+                    raise IncompleteResponseError(missing, partial, "stop")
+                return {item_id: f"译文{item_id}" for item_id in ids}
+
+        translator = PartialDeepSeek("test-key", cache=TranslationCache(self.root / "repair.sqlite3"))
+        result = translator.translate_many([f"Segment {index} text" for index in range(29)])
+        self.assertEqual(len(result), 29)
+        self.assertEqual(translator.calls[1], list(range(11, 22)))
+        self.assertEqual(translator.usage["repair_requests"], 1)
+        self.assertEqual(translator.usage["recovered_segments"], 18)
+
+    def test_api_splits_an_invalid_batch_down_to_single_segments(self):
+        class SplitDeepSeek(DeepSeekTranslator):
+            def _request(inner, items, review=False):
+                ids = {int(item["id"]) for item in items}
+                if len(items) > 1:
+                    raise IncompleteResponseError(ids, {}, "stop")
+                return {int(items[0]["id"]): "单段译文"}
+
+        translator = SplitDeepSeek("test-key", cache=TranslationCache(self.root / "split.sqlite3"))
+        self.assertEqual(translator.translate_many(["First segment", "Second segment"]), ["单段译文", "单段译文"])
+        self.assertGreaterEqual(translator.usage["split_retries"], 1)
+
+    def test_api_disables_thinking_and_records_finish_reason(self):
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self):
+                return json.dumps({
+                    "choices": [{
+                        "finish_reason": "stop",
+                        "message": {"content": '{"translations":[{"id":0,"text":"译文"}]}'},
+                    }],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+                }).encode("utf-8")
+
+        translator = DeepSeekTranslator("test-key", cache=TranslationCache(self.root / "payload.sqlite3"))
+        with patch("translator_app.deepseek.urllib.request.urlopen", return_value=FakeResponse()) as mocked:
+            self.assertEqual(translator._request([{"id": 0, "text": "Pump"}]), {0: "译文"})
+        request = mocked.call_args.args[0]
+        payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
+        self.assertGreaterEqual(payload["max_tokens"], 2048)
+        self.assertEqual(translator.usage["finish_reasons"], {"stop": 1})
 
     def test_cache_trims_oldest_rows_and_compacts_file(self):
         path = self.root / "limited-cache.sqlite3"
@@ -149,6 +206,63 @@ class CoreTests(unittest.TestCase):
             self.assertIn("润滑油泵安装调试手册", translated[0].get_text())
         finally:
             translated.close()
+
+    def test_pdf_failure_reports_exact_page_and_preserves_real_progress(self):
+        source = self.root / "two-pages.pdf"
+        document = fitz.open()
+        document.new_page(width=400, height=300).insert_text((30, 50), "First page text", fontsize=12)
+        document.new_page(width=400, height=300).insert_text((30, 50), "Second page text", fontsize=12)
+        document.save(source); document.close()
+
+        class FailingTranslator:
+            usage = {"offline": True}
+            calls = 0
+            def translate_many(inner, texts, progress=None):
+                inner.calls += 1
+                if inner.calls == 2:
+                    raise DeepSeekError("simulated missing segment")
+                if progress:
+                    progress(len(texts), len(texts))
+                return list(texts)
+
+        updates = []
+        result = PdfEngine().translate(
+            source,
+            self.root / "failed_ZH.pdf",
+            FailingTranslator(),
+            self.options,
+            lambda _file, fraction, message: updates.append((fraction, message)),
+        )
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.translated_units, 1)
+        self.assertIn("第 2/2 页", result.errors[0])
+        self.assertLess(updates[-1][0], 1.0)
+
+    def test_pipeline_does_not_report_full_progress_when_pdf_fails(self):
+        source = self.root / "pipeline-failure.pdf"
+        document = fitz.open()
+        document.new_page(width=400, height=300).insert_text((30, 50), "First page text", fontsize=12)
+        document.new_page(width=400, height=300).insert_text((30, 50), "Second page text", fontsize=12)
+        document.save(source); document.close()
+
+        class FailingTranslator:
+            usage = {}
+            calls = 0
+            def translate_many(inner, texts, progress=None):
+                inner.calls += 1
+                if inner.calls == 2:
+                    raise DeepSeekError("simulated failure")
+                return list(texts)
+
+        updates = []
+        options = TranslationOptions(target_language="zh", output_dir=self.root)
+        results = TranslationPipeline().run(
+            [source], FailingTranslator(), options,
+            lambda _file, fraction, message: updates.append((fraction, message)),
+        )
+        self.assertEqual(results[0].status, "failed")
+        self.assertLess(updates[-1][0], 1.0)
+        self.assertIn("失败", updates[-1][1])
 
     def test_docx_preserves_table(self):
         source, output = self.root / "sample.docx", self.root / "sample_ZH.docx"

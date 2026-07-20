@@ -4,6 +4,36 @@
 
 This project follows semantic versioning. Stable builds are available from [GitHub Releases](https://github.com/WANG40929/engineering-document-translator/releases).
 
+## 1.1.0
+
+### 中文
+
+- 按确认视觉稿重新设计无边框主界面：集中显示语言、模型、输出位置、拖放区域、文件状态和单文件进度。
+- 界面使用蓝色线条图标；桌面快捷方式与任务栏保留原有黑橙线条和白色圆角背景。
+- 翻译运行时显示“停止”按钮，空闲状态自动隐藏。
+- 新增设置窗口，包含翻译设置、高级参数和软件介绍。
+- 进度改为按实际文字段落计算，并动态显示已用时间和预计剩余时间。
+- DeepSeek 返回缺少段落时，保留有效结果并只补译缺失内容；必要时自动拆分批次。
+- 翻译任务默认关闭 V4 思考模式，并记录接口结束原因、修复请求和拆分重试信息。
+- 失败报告现在包含准确的 PDF 页码和已完成段落数；失败任务不再错误显示 100%。
+- 修复批量大小和请求超时配置未真正传入翻译任务的问题。
+- 修复 Windows 显示缩放下无边框窗口误判鼠标区域、开始按钮无法点击的问题。
+- 使用 Qt 原生缩放手柄恢复四边和四角窗口缩放，避免覆盖内部控件。
+
+### English
+
+- Redesigned the frameless main window around language, model, output, drag-and-drop, file status, and per-file progress.
+- Added a lightweight blue line icon in the interface while retaining the original black/orange shortcut icon on a white rounded tile.
+- Added a Stop button that appears only while a translation job is running.
+- Added a settings dialog with translation options, advanced controls, and an About page.
+- Progress now uses real text-unit counts and shows elapsed time plus a dynamic ETA.
+- Incomplete DeepSeek JSON responses preserve valid segments and repair only missing IDs, recursively splitting when needed.
+- V4 thinking mode is disabled for translation, with finish reasons and recovery diagnostics recorded.
+- PDF failures report the exact page and completed segment count, without falsely showing 100% progress.
+- Fixed batch-size and request-timeout settings not being passed to translation jobs.
+- Fixed incorrect mouse hit testing and an unclickable Start button on scaled Windows displays.
+- Restored edge and corner resizing with Qt-native handles that do not overlap application controls.
+
 ## 1.0.0
 
 首个正式公开版本 / First stable public release.

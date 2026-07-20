@@ -115,16 +115,47 @@ class PdfEngine(TranslationEngine):
         document = fitz.open(source)
         try:
             total_pages = document.page_count
+            # Scan first so progress reflects actual text work instead of
+            # treating a seven-line drawing and an eighty-line page equally.
+            page_lines = [self._page_lines(document[index]) for index in range(total_pages)]
+            total_units = sum(len(lines) for lines in page_lines)
+            completed_units = 0
+            if progress:
+                progress(str(source), 0.0, f"已分析 PDF：{total_pages} 页，共 {total_units} 个文字段落")
             for page_index in range(total_pages):
                 page = document[page_index]
-                lines = self._page_lines(page)
+                lines = page_lines[page_index]
                 if not lines:
                     result.skipped_pages.append(page_index + 1)
                     result.skipped_units += 1
                     if progress:
-                        progress(str(source), (page_index + 1) / max(total_pages, 1), f"第 {page_index + 1} 页无可翻译文字层，已保留原样")
+                        fraction = completed_units / max(total_units, 1) if total_units else (page_index + 1) / max(total_pages, 1)
+                        progress(str(source), fraction, f"第 {page_index + 1}/{total_pages} 页无文字层，已保留原样")
                     continue
-                translations = translator.translate_many([line["text"] for line in lines])
+                if progress:
+                    progress(
+                        str(source),
+                        completed_units / max(total_units, 1),
+                        f"正在翻译 PDF 第 {page_index + 1}/{total_pages} 页（本页 {len(lines)} 段）",
+                    )
+
+                def batch_progress(done, pending_total):
+                    if not progress or not pending_total:
+                        return
+                    page_fraction = min(1.0, done / max(pending_total, 1))
+                    units = completed_units + round(len(lines) * page_fraction)
+                    progress(
+                        str(source),
+                        units / max(total_units, 1),
+                        f"正在翻译 PDF 第 {page_index + 1}/{total_pages} 页 · 本页批次 {done}/{pending_total}",
+                    )
+
+                try:
+                    translations = translator.translate_many([line["text"] for line in lines], progress=batch_progress)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"PDF 第 {page_index + 1}/{total_pages} 页翻译失败（已完成 {completed_units}/{total_units} 段）：{exc}"
+                    ) from exc
                 for line in lines:
                     page.add_redact_annot(line["rect"], fill=False, cross_out=False)
                 page.apply_redactions(images=0, graphics=0, text=0)
@@ -135,8 +166,13 @@ class PdfEngine(TranslationEngine):
                     elif used_size < options.minimum_pdf_font_size:
                         result.warnings.append(f"第 {page_index + 1} 页译文字号缩小至 {used_size:.1f} pt：{line['text'][:60]}")
                     result.translated_units += 1
+                completed_units += len(lines)
                 if progress:
-                    progress(str(source), (page_index + 1) / max(total_pages, 1), f"正在处理 PDF 第 {page_index + 1}/{total_pages} 页")
+                    progress(
+                        str(source),
+                        completed_units / max(total_units, 1),
+                        f"已完成 PDF 第 {page_index + 1}/{total_pages} 页 · {completed_units}/{total_units} 段",
+                    )
             destination.parent.mkdir(parents=True, exist_ok=True)
             document.subset_fonts()
             document.save(destination, garbage=3, deflate=True, clean=False)

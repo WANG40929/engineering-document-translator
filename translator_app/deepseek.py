@@ -36,6 +36,17 @@ class DeepSeekError(RuntimeError):
     pass
 
 
+class IncompleteResponseError(DeepSeekError):
+    """The API returned valid JSON, but omitted one or more requested IDs."""
+
+    def __init__(self, missing: set[int], partial: dict[int, str], finish_reason: str = ""):
+        self.missing = missing
+        self.partial = partial
+        self.finish_reason = finish_reason
+        reason = f"，结束原因：{finish_reason}" if finish_reason else ""
+        super().__init__(f"接口返回缺少段落：{sorted(missing)}{reason}")
+
+
 class DeepSeekTranslator:
     def __init__(
         self,
@@ -66,7 +77,22 @@ class DeepSeekTranslator:
         self.pure_target_language = pure_target_language
         self.quality_review = quality_review
         self.force_refresh = force_refresh
-        self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "requests": 0, "cache_hits": 0, "quality_retries": 0}
+        self.usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "requests": 0,
+            "api_attempts": 0,
+            "cache_hits": 0,
+            "quality_retries": 0,
+            "schema_failures": 0,
+            "repair_requests": 0,
+            "split_retries": 0,
+            "recovered_segments": 0,
+            "transport_retries": 0,
+            "finish_reasons": {},
+            "thinking_mode": "disabled",
+        }
         policy = "|".join((
             CACHE_POLICY_VERSION,
             self.model,
@@ -111,6 +137,12 @@ class DeepSeekTranslator:
             ],
             "temperature": 0.1,
             "response_format": {"type": "json_object"},
+            # V4 enables thinking by default. Translation is a deterministic
+            # transformation task, so thinking only adds latency and tokens.
+            "thinking": {"type": "disabled"},
+            # Give JSON enough room while keeping accidental runaway output
+            # bounded. DeepSeek may otherwise return a truncated JSON object.
+            "max_tokens": max(2048, min(16384, sum(len(str(item.get("text", ""))) for item in items) * 2 + 1024)),
             "stream": False,
         }
         request = urllib.request.Request(
@@ -122,30 +154,89 @@ class DeepSeekTranslator:
         last_error: Exception | None = None
         for attempt in range(4):
             try:
+                self.usage["api_attempts"] += 1
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     payload = json.loads(response.read().decode("utf-8"))
                 self.usage["requests"] += 1
                 for key, value in payload.get("usage", {}).items():
                     if key in self.usage and isinstance(value, int):
                         self.usage[key] += value
-                content = payload["choices"][0]["message"]["content"]
+                choice = payload["choices"][0]
+                finish_reason = str(choice.get("finish_reason") or "unknown")
+                reasons = self.usage["finish_reasons"]
+                reasons[finish_reason] = reasons.get(finish_reason, 0) + 1
+                content = choice["message"]["content"]
                 parsed = json.loads(content)
                 translations = parsed.get("translations", parsed if isinstance(parsed, list) else [])
                 result = {int(item["id"]): str(item["text"]) for item in translations}
                 missing = {int(item["id"]) for item in items} - set(result)
                 if missing:
-                    raise DeepSeekError(f"接口返回缺少段落：{sorted(missing)}")
+                    self.usage["schema_failures"] += 1
+                    # Do not repeat the same large request four times. The
+                    # caller will preserve valid items and repair only missing
+                    # IDs, splitting the batch when necessary.
+                    raise IncompleteResponseError(missing, result, finish_reason)
                 return result
+            except IncompleteResponseError:
+                raise
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")[:1000]
                 last_error = DeepSeekError(f"DeepSeek HTTP {exc.code}: {detail}")
                 if exc.code not in {408, 429, 500, 502, 503, 504}:
                     break
-            except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, DeepSeekError) as exc:
+            except (
+                urllib.error.URLError,
+                TimeoutError,
+                json.JSONDecodeError,
+                KeyError,
+                IndexError,
+                TypeError,
+                ValueError,
+                DeepSeekError,
+            ) as exc:
                 last_error = exc
             if attempt < 3:
+                self.usage["transport_retries"] += 1
                 time.sleep((2**attempt) + random.random())
         raise DeepSeekError(f"DeepSeek 请求失败：{last_error}")
+
+    def _request_resilient(
+        self,
+        items: list[dict],
+        review: bool = False,
+        depth: int = 0,
+        single_retry: int = 0,
+    ) -> dict[int, str]:
+        """Recover omitted IDs and recursively split batches that remain invalid."""
+        if not items:
+            return {}
+        try:
+            result = self._request(items, review=True) if review else self._request(items)
+            missing = {int(item["id"]) for item in items} - set(result)
+            if missing:
+                raise IncompleteResponseError(missing, result)
+            return result
+        except IncompleteResponseError as exc:
+            result = dict(exc.partial)
+            missing_items = [item for item in items if int(item["id"]) in exc.missing]
+            self.usage["recovered_segments"] += len(result)
+            if result and missing_items:
+                self.usage["repair_requests"] += 1
+                result.update(self._request_resilient(missing_items, review, depth + 1))
+                return result
+            if len(items) > 1:
+                midpoint = len(items) // 2
+                self.usage["split_retries"] += 1
+                left = self._request_resilient(items[:midpoint], review, depth + 1)
+                right = self._request_resilient(items[midpoint:], review, depth + 1)
+                left.update(right)
+                return left
+            # A single segment can still be a transient model-format failure.
+            # Retry it twice before surfacing a precise terminal error.
+            if single_retry < 2:
+                self.usage["repair_requests"] += 1
+                return self._request_resilient(items, review, depth + 1, single_retry + 1)
+            raise DeepSeekError(f"单段翻译仍未返回，段落编号：{items[0]['id']}") from exc
 
     def translate_many(
         self,
@@ -174,7 +265,7 @@ class DeepSeekTranslator:
             batch = pending[start : start + self.batch_size]
             protected = [protect_text(text) for text in batch]
             items = [{"id": i, "text": value.text} for i, value in enumerate(protected)]
-            translated = self._request(items)
+            translated = self._request_resilient(items)
             cache_pairs = []
             for local_index, (source, protected_text) in enumerate(zip(batch, protected)):
                 value = protected_text.restore(translated[local_index]).strip()
@@ -213,7 +304,7 @@ class DeepSeekTranslator:
             batch = suspects[start : start + self.batch_size]
             protected = [protect_text(text) for text in batch]
             items = [{"id": i, "text": value.text} for i, value in enumerate(protected)]
-            reviewed = self._request(items, review=True)
+            reviewed = self._request_resilient(items, review=True)
             cache_pairs = []
             for local_index, (source, protected_text) in enumerate(zip(batch, protected)):
                 value = protected_text.restore(reviewed[local_index]).strip()

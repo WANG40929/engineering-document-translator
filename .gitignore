@@ -40,3 +40,4 @@ translations.sqlite3*
 
 # Image-generation intermediate files
 translator_app/assets/*chroma*.png
+tmp/
