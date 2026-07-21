@@ -22,6 +22,10 @@ PROTECTED_PATTERNS = [
     r"(?<!\w)\d+(?:[.,]\d+)?\s*[x×]\s*\d+(?:[.,]\d+)?(?:\s*[x×]\s*\d+(?:[.,]\d+)?)?(?!\w)",
 ]
 PROTECTED_RE = re.compile("|".join(f"(?:{p})" for p in PROTECTED_PATTERNS), re.IGNORECASE)
+PLACEHOLDER_FLEX_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:_{1,2}\s*)?UDT\s*_?\s*(\d{4})(?:\s*_{1,2})?(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
 
 
 def normalize_text(text: str) -> str:
@@ -50,11 +54,25 @@ class ProtectedText:
         result = translated
         for index, value in enumerate(self.values):
             token = f"__UDT_{index:04d}__"
-            # Models occasionally add spaces inside placeholders.
-            flexible = re.compile(rf"__\s*UDT\s*_?\s*{index:04d}\s*__", re.IGNORECASE)
+            # Models occasionally remove underscores or insert spaces inside
+            # placeholders. Accept those variants so internal markers never
+            # leak into a translated document.
+            flexible = re.compile(
+                rf"(?<![A-Za-z0-9])(?:_{{1,2}}\s*)?UDT\s*_?\s*{index:04d}(?:\s*_{{1,2}})?(?![A-Za-z0-9])",
+                re.IGNORECASE,
+            )
             result = flexible.sub(lambda _m, v=value: v, result)
             result = result.replace(token, value)
         return result
+
+
+def placeholder_indexes(text: str) -> list[int]:
+    """Return all internal placeholder indexes, including model-mangled forms."""
+    return [int(match.group(1)) for match in PLACEHOLDER_FLEX_RE.finditer(text)]
+
+
+def has_internal_placeholder(text: str) -> bool:
+    return PLACEHOLDER_FLEX_RE.search(text) is not None
 
 
 def protect_text(text: str) -> ProtectedText:
