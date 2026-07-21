@@ -4,6 +4,24 @@
 
 This project follows semantic versioning. Stable builds are available from [GitHub Releases](https://github.com/WANG40929/engineering-document-translator/releases).
 
+## 1.1.1
+
+### 中文
+
+- PDF 译文固定以原文字形框的起点为锚点，不再因误判居中而横向移动正文。
+- 译文优先保持原字号，并利用相邻空白区域换行；页眉、页码及长句不再被压缩成极小字体。
+- 增强 `UDT_0000` 内部占位符还原，兼容模型删除下划线或插入空格的情况。
+- DeepSeek 返回多余、缺失或损坏的占位符时只重试受影响文本段，异常结果不会写入缓存。
+- 旧缓存中的占位符污染会按条目自动修复；无法安全还原的条目会被删除并重新翻译，无需清空全部缓存。
+
+### English
+
+- Anchored PDF translations to the original glyph-box origin so body text no longer shifts after false center detection.
+- Preserved source font sizes by using adjacent whitespace and safe wrapping instead of shrinking headers and long lines to unreadable sizes.
+- Restored mangled internal placeholders such as `UDT_0000`, including variants with removed underscores or inserted spaces.
+- Retried only segments with missing, extra, or malformed placeholders and prevented invalid responses from entering the cache.
+- Added selective self-healing for previously polluted cache entries without clearing unrelated translation history.
+
 ## 1.1.0
 
 ### 中文

@@ -7,10 +7,17 @@ import re
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
 from collections.abc import Callable, Sequence
 
 from .cache import TranslationCache
-from .text_utils import glossary_signature, is_translatable, protect_text
+from .text_utils import (
+    glossary_signature,
+    has_internal_placeholder,
+    is_translatable,
+    placeholder_indexes,
+    protect_text,
+)
 
 
 LANGUAGE_NAMES = {
@@ -176,6 +183,19 @@ class DeepSeekTranslator:
                     # caller will preserve valid items and repair only missing
                     # IDs, splitting the batch when necessary.
                     raise IncompleteResponseError(missing, result, finish_reason)
+                expected_by_id = {
+                    int(item["id"]): Counter(placeholder_indexes(str(item.get("text", ""))))
+                    for item in items
+                }
+                invalid = {
+                    item_id
+                    for item_id, expected in expected_by_id.items()
+                    if Counter(placeholder_indexes(result.get(item_id, ""))) != expected
+                }
+                if invalid:
+                    self.usage["schema_failures"] += 1
+                    valid = {item_id: value for item_id, value in result.items() if item_id not in invalid}
+                    raise IncompleteResponseError(invalid, valid, "invalid placeholders")
                 return result
             except IncompleteResponseError:
                 raise
@@ -252,6 +272,27 @@ class DeepSeekTranslator:
         cached_values = {} if self.force_refresh else self.cache.get_many(
             self.source_language, self.target_language, list(indexes_by_text), self._cache_signature
         )
+        repaired_cache_pairs: list[tuple[str, str]] = []
+        stale_cache_texts: list[str] = []
+        for source, cached in list(cached_values.items()):
+            repaired = protect_text(source).restore(cached)
+            if has_internal_placeholder(repaired):
+                # Old versions could cache an un-restored or hallucinated UDT
+                # marker. Do not copy it into another document: evict only the
+                # affected entry and translate that segment again.
+                stale_cache_texts.append(source)
+                cached_values.pop(source, None)
+            elif repaired != cached:
+                cached_values[source] = repaired
+                repaired_cache_pairs.append((source, repaired))
+        if stale_cache_texts:
+            self.cache.delete_many(
+                self.source_language, self.target_language, stale_cache_texts, self._cache_signature
+            )
+        if repaired_cache_pairs:
+            self.cache.put_many(
+                self.source_language, self.target_language, repaired_cache_pairs, self._cache_signature
+            )
         pending: list[str] = []
         for text, indexes in indexes_by_text.items():
             if text in cached_values:

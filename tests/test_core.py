@@ -47,6 +47,7 @@ class CoreTests(unittest.TestCase):
         protected = protect_text("Pump KZ5001-MB-010 is 6.3 kV")
         self.assertIn("__UDT_", protected.text)
         self.assertEqual(protected.restore(protected.text), "Pump KZ5001-MB-010 is 6.3 kV")
+        self.assertEqual(protected.restore("Pump UDT_0000 is UDT 0001"), "Pump KZ5001-MB-010 is 6.3 kV")
         self.assertFalse(is_translatable("KZ5001-MB-010"))
         self.assertTrue(is_translatable("Lube oil pump"))
 
@@ -117,6 +118,54 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(payload["thinking"], {"type": "disabled"})
         self.assertGreaterEqual(payload["max_tokens"], 2048)
         self.assertEqual(translator.usage["finish_reasons"], {"stop": 1})
+
+    def test_api_retries_a_hallucinated_placeholder(self):
+        class FakeResponse:
+            def __init__(self, text): self.text = text
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self):
+                content = json.dumps({"translations": [{"id": 0, "text": self.text}]}, ensure_ascii=False)
+                return json.dumps({
+                    "choices": [{"finish_reason": "stop", "message": {"content": content}}],
+                    "usage": {},
+                }, ensure_ascii=False).encode("utf-8")
+
+        translator = DeepSeekTranslator(
+            "test-key",
+            cache=TranslationCache(self.root / "placeholder-response.sqlite3"),
+            quality_review=False,
+        )
+        responses = [FakeResponse("安全 UDT_0000"), FakeResponse("安全要求")]
+        with patch("translator_app.deepseek.urllib.request.urlopen", side_effect=responses) as mocked:
+            self.assertEqual(translator.translate_many(["Safety requirements"]), ["安全要求"])
+        self.assertEqual(mocked.call_count, 2)
+        self.assertEqual(translator.usage["schema_failures"], 1)
+
+    def test_polluted_cache_is_repaired_or_selectively_refreshed(self):
+        class RepairingDeepSeek(DeepSeekTranslator):
+            calls = []
+            def _request(inner, items, review=False):
+                inner.calls.extend(item["text"] for item in items)
+                return {int(item["id"]): "安全要求" for item in items}
+
+        cache = TranslationCache(self.root / "polluted-cache.sqlite3")
+        translator = RepairingDeepSeek("test-key", cache=cache, quality_review=False)
+        code_source = "Pump SEPCO1 is ready"
+        plain_source = "Safety requirements"
+        cache.put_many("auto", "zh", [
+            (code_source, "泵 UDT_0000 已就绪"),
+            (plain_source, "安全 UDT_0000"),
+        ], translator._cache_signature)
+
+        result = translator.translate_many([code_source, plain_source])
+        self.assertEqual(result, ["泵 SEPCO1 已就绪", "安全要求"])
+        self.assertEqual(len(translator.calls), 1)
+        self.assertIn("Safety requirements", translator.calls[0])
+        self.assertNotIn(
+            "UDT_",
+            cache.get("auto", "zh", plain_source, translator._cache_signature),
+        )
 
     def test_cache_trims_oldest_rows_and_compacts_file(self):
         path = self.root / "limited-cache.sqlite3"
@@ -204,6 +253,93 @@ class CoreTests(unittest.TestCase):
         translated = fitz.open(output)
         try:
             self.assertIn("润滑油泵安装调试手册", translated[0].get_text())
+        finally:
+            translated.close()
+
+    def test_pdf_long_body_line_keeps_original_start_position(self):
+        source, output = self.root / "body-line.pdf", self.root / "body-line_ZH.pdf"
+        document = fitz.open()
+        page = document.new_page(width=595.3, height=400)
+        page.insert_text(
+            (92.8, 180),
+            "Still equipment stored inside the building is not adequately protected and may be damaged",
+            fontname="helv",
+            fontsize=10,
+        )
+        source_line = page.get_text("dict")["blocks"][0]["lines"][0]
+        source_x0 = fitz.Rect(source_line["bbox"]).x0
+        document.save(source); document.close()
+
+        class ShortTranslator:
+            usage = {"offline": True}
+            def translate_many(self, texts, progress=None):
+                return ["Equipment is unprotected" for _ in texts]
+
+        result = PdfEngine().translate(source, output, ShortTranslator(), self.options)
+        self.assertEqual(result.status, "completed")
+        translated = fitz.open(output)
+        try:
+            translated_line = translated[0].get_text("dict")["blocks"][0]["lines"][0]
+            translated_x0 = fitz.Rect(translated_line["bbox"]).x0
+            self.assertAlmostEqual(translated_x0, source_x0, delta=1.0)
+        finally:
+            translated.close()
+
+    def test_pdf_translation_uses_adjacent_whitespace_before_shrinking_font(self):
+        source, output = self.root / "header-fields.pdf", self.root / "header-fields_ZH.pdf"
+        document = fitz.open()
+        page = document.new_page(width=595.3, height=300)
+        page.insert_text((414.6, 50), "Page:", fontsize=10)
+        page.insert_text((467.9, 50), "2 of 4", fontsize=10)
+        document.save(source); document.close()
+
+        class HeaderTranslator:
+            usage = {"offline": True}
+            def translate_many(self, texts, progress=None):
+                return ["Page label", "Page 2 of 4"]
+
+        result = PdfEngine().translate(source, output, HeaderTranslator(), self.options)
+        self.assertEqual(result.status, "completed")
+        translated = fitz.open(output)
+        try:
+            spans = [
+                span
+                for block in translated[0].get_text("dict")["blocks"]
+                for line in block.get("lines", [])
+                for span in line.get("spans", [])
+                if span.get("text", "").strip()
+            ]
+            self.assertGreaterEqual(min(span["size"] for span in spans), 9.5)
+        finally:
+            translated.close()
+
+    def test_pdf_standalone_translation_wraps_without_tiny_font(self):
+        source, output = self.root / "standalone.pdf", self.root / "standalone_ZH.pdf"
+        document = fitz.open()
+        page = document.new_page(width=595.3, height=300)
+        page.insert_text((56.8, 80), "requirements", fontsize=11)
+        document.save(source); document.close()
+
+        class LongTranslator:
+            usage = {"offline": True}
+            def translate_many(self, texts, progress=None):
+                return [
+                    "All personnel must comply with the site safety requirements and use approved equipment."
+                ]
+
+        result = PdfEngine().translate(source, output, LongTranslator(), self.options)
+        self.assertEqual(result.status, "completed")
+        translated = fitz.open(output)
+        try:
+            spans = [
+                span
+                for block in translated[0].get_text("dict")["blocks"]
+                for line in block.get("lines", [])
+                for span in line.get("spans", [])
+                if span.get("text", "").strip()
+            ]
+            self.assertTrue(spans)
+            self.assertGreaterEqual(min(span["size"] for span in spans), 10.5)
         finally:
             translated.close()
 

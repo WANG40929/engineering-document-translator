@@ -37,6 +37,7 @@ class PdfEngine(TranslationEngine):
 
     def _page_lines(self, page) -> list[dict]:
         lines: list[dict] = []
+        visual_rects: list[fitz.Rect] = []
         data = page.get_text("dict", flags=fitz.TEXTFLAGS_TEXT)
         for block in data.get("blocks", []):
             if block.get("type") != 0:
@@ -44,21 +45,16 @@ class PdfEngine(TranslationEngine):
             for line in block.get("lines", []):
                 spans = line.get("spans", [])
                 text = normalize_text("".join(span.get("text", "") for span in spans))
-                if not spans or not is_translatable(text):
+                if not spans:
                     continue
                 rect = fitz.Rect(line["bbox"])
                 if rect.is_empty or rect.width < 0.5 or rect.height < 0.5:
                     continue
+                visual_rects.append(rect)
+                if not is_translatable(text):
+                    continue
                 dominant = max(spans, key=lambda span: len(span.get("text", "")))
                 rotation = _rotation(line.get("dir"))
-                if rotation in (0, 180):
-                    page_midpoint = page.cropbox.width / 2
-                    line_midpoint = rect.x0 + rect.width / 2
-                    centered = abs(line_midpoint - page_midpoint) <= page.cropbox.width * 0.04
-                else:
-                    page_midpoint = page.cropbox.height / 2
-                    line_midpoint = rect.y0 + rect.height / 2
-                    centered = abs(line_midpoint - page_midpoint) <= page.cropbox.height * 0.04
                 lines.append(
                     {
                         "text": text,
@@ -66,31 +62,67 @@ class PdfEngine(TranslationEngine):
                         "size": float(dominant.get("size", 9)),
                         "color": _rgb(dominant.get("color", 0)),
                         "rotate": rotation,
-                        "align": 1 if centered else 0,
+                        # A PDF text layer stores glyph coordinates, not the
+                        # paragraph alignment used by the source application.
+                        # Inferring centering from the line midpoint moved long
+                        # body lines when a shorter translation was inserted.
+                        # Anchor every translation to the original glyph box.
+                        "align": 0,
                     }
                 )
+        # The glyph bbox is often only as wide as the source words. Reusing
+        # that narrow box forces longer translations (especially Chinese page
+        # labels) down to tiny font sizes. Keep the original top-left anchor,
+        # but extend the fitting area through adjacent whitespace. Nearby text
+        # on the same row or below remains a hard boundary.
+        page_right = page.cropbox.x1 - max(12.0, page.cropbox.width * 0.03)
+        page_bottom = page.cropbox.y1 - max(12.0, page.cropbox.height * 0.02)
+        for item in lines:
+            rect = fitz.Rect(item["rect"])
+            if item["rotate"] not in (0, 180):
+                item["fit_rect"] = rect
+                continue
+            right = page_right
+            for other in visual_rects:
+                if other.x0 < rect.x1 + 1.0:
+                    continue
+                vertical_overlap = min(rect.y1, other.y1) - max(rect.y0, other.y0)
+                if vertical_overlap >= min(rect.height, other.height) * 0.45:
+                    right = min(right, other.x0 - 4.0)
+            right = max(rect.x1, right)
+            bottom = page_bottom
+            for other in visual_rects:
+                if other.y0 < rect.y1 - 0.5:
+                    continue
+                horizontal_overlap = min(right, other.x1) - max(rect.x0, other.x0)
+                if horizontal_overlap >= 2.0:
+                    bottom = min(bottom, other.y0 - 1.0)
+            bottom = max(rect.y1, bottom)
+            item["fit_rect"] = fitz.Rect(rect.x0, rect.y0, right, bottom)
         return lines
 
     def _insert_fitted(self, page, line: dict, text: str, minimum: float) -> tuple[bool, float]:
-        rect = fitz.Rect(line["rect"])
+        source_rect = fitz.Rect(line["rect"])
+        rect = fitz.Rect(line.get("fit_rect", source_rect))
         rotation = line["rotate"]
-        flow_length = rect.width if rotation in (0, 180) else rect.height
-        cross_length = rect.height if rotation in (0, 180) else rect.width
-        unit_length = max(self.font.text_length(text, fontsize=1), 0.01)
-        size_by_length = flow_length * 0.96 / unit_length
-        size_by_height = cross_length * 0.88
-        size = max(1.2, min(line["size"], size_by_length, size_by_height))
+        cross_length = source_rect.height if rotation in (0, 180) else source_rect.width
+        size = max(1.2, line["size"])
         # Unicode fonts can have taller ascenders than the source font. The
         # original implementation tried only once, so a failed title insert
         # left an empty redaction box. Build an uncommitted shape first and
         # progressively reduce the size until the text really fits.
         margin = min(2.5, max(0.8, cross_length * 0.18))
         if rotation in (0, 180):
-            rect.y0 -= margin; rect.y1 += margin
+            rect.y1 += margin * 2
         else:
-            rect.x0 -= margin; rect.x1 += margin
+            rect.x1 += margin * 2
+        floor = max(1.2, min(float(minimum), size))
         candidate_size = size
-        while candidate_size >= 1.2:
+        attempted_floor = False
+        while candidate_size >= floor - 0.01:
+            if candidate_size < floor:
+                candidate_size = floor
+            attempted_floor = abs(candidate_size - floor) < 0.01
             shape = page.new_shape()
             spare = shape.insert_textbox(
                 rect,
@@ -106,7 +138,9 @@ class PdfEngine(TranslationEngine):
             if spare >= -0.05:
                 shape.commit(overlay=True)
                 return True, candidate_size
-            candidate_size *= 0.88
+            if attempted_floor:
+                break
+            candidate_size = max(floor, candidate_size * 0.94)
         return False, candidate_size
 
     def translate(self, source, destination, translator, options, progress=None) -> FileResult:
