@@ -6,7 +6,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from .engines import CsvEngine, DocEngine, DocxEngine, PdfEngine, XlsxEngine
+from .engines import BabelDocEngine, CsvEngine, DocEngine, DocxEngine, PdfEngine, XlsxEngine
 from .models import FileResult, ProgressCallback, TranslationOptions
 
 
@@ -15,19 +15,29 @@ SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".xlsx", ".xlsm", ".csv", ".tsv
 
 class TranslationPipeline:
     def __init__(self):
-        self.engines = [PdfEngine(), DocxEngine(), XlsxEngine(), CsvEngine(), DocEngine()]
+        self.strict_pdf_engine = PdfEngine()
+        self.smart_pdf_engine = BabelDocEngine()
+        self.engines = [self.strict_pdf_engine, DocxEngine(), XlsxEngine(), CsvEngine(), DocEngine()]
 
-    def engine_for(self, path: Path):
+    def engine_for(self, path: Path, options: TranslationOptions | None = None):
+        if path.suffix.lower() == ".pdf" and options is not None:
+            if options.pdf_mode == "smart":
+                return self.smart_pdf_engine
+            if options.pdf_mode == "auto":
+                if self.smart_pdf_engine.available(options) and self.smart_pdf_engine.looks_like_prose(path):
+                    return self.smart_pdf_engine
+                return self.strict_pdf_engine
         return next((engine for engine in self.engines if engine.supports(path)), None)
 
     @staticmethod
     def output_path(source: Path, options: TranslationOptions) -> Path:
         folder = options.output_dir or source.parent
         suffix = options.target_language.upper()
-        candidate = Path(folder) / f"{source.stem}_{suffix}{source.suffix}"
+        output_tag = f"_{suffix}_DUAL" if source.suffix.lower() == ".pdf" and options.pdf_output == "dual" else f"_{suffix}"
+        candidate = Path(folder) / f"{source.stem}{output_tag}{source.suffix}"
         number = 2
         while candidate.exists() or candidate.resolve() == source.resolve():
-            candidate = Path(folder) / f"{source.stem}_{suffix}_{number}{source.suffix}"
+            candidate = Path(folder) / f"{source.stem}{output_tag}_{number}{source.suffix}"
             number += 1
         return candidate
 
@@ -55,7 +65,7 @@ class TranslationPipeline:
                 progress(str(source), sum(file_fractions) / max(total, 1), f"准备处理 {index + 1}/{total}：{source.name}")
             if not source.exists():
                 results.append(FileResult(str(source), status="failed", errors=["文件不存在"])); continue
-            engine = self.engine_for(source)
+            engine = self.engine_for(source, options)
             if not engine:
                 results.append(FileResult(str(source), status="unsupported", errors=[f"暂不支持 {source.suffix} 格式"])); continue
             digest = self._digest(source) if size_counts.get(source.stat().st_size, 0) > 1 else ""

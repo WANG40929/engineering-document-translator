@@ -35,6 +35,9 @@ class TranslationOptions:
     pure_target_language: bool = False
     quality_review: bool = True
     force_refresh: bool = False
+    pdf_mode: str = "auto"
+    pdf_output: str = "mono"
+    babeldoc_path: Path | None = None
 
 
 @dataclass(slots=True)
@@ -50,6 +53,7 @@ class FileResult:
     errors: list[str] = field(default_factory=list)
     usage: dict = field(default_factory=dict)
     elapsed_seconds: float = 0.0
+    additional_outputs: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

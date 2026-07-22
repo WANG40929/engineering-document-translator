@@ -37,6 +37,15 @@
 
 普通翻译工具往往只关心文字，却容易破坏工程文档的表格、图纸、页眉页脚和技术编号。本项目专门面向工程手册、图纸、装箱单、设备清单等文件：只处理已有文字层，尽量保留原文件结构，并在发送API请求前保护图号、KKS、标准号、尺寸和单位。
 
+### 下载哪个版本？
+
+| 版本 | 是否包含智能 PDF 引擎 | 推荐用途 |
+|---|---|---|
+| **完整版 / Full** | 包含 BabelDOC、布局模型和字体，解压后约 1 GB | 报告、说明书、论文等连续正文 PDF；下载后直接使用智能排版 |
+| **轻量版 / Lite** | 不包含 BabelDOC，体积较小 | Word、Excel、CSV、工程图纸和短标签 PDF；也可自行安装引擎 |
+
+两个版本的主程序功能完全相同。轻量版找不到 BabelDOC 时会自动使用“原位保版”，不会影响其他格式。详细区别和自行安装方法见 [下载版本说明 / Download Editions](docs/DOWNLOADS.md)。完整版必须解压整个文件夹运行，不要只移动其中的 EXE。
+
 ### 三步开始使用
 
 1. 从 [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest) 下载最新版 Windows EXE。
@@ -49,7 +58,7 @@
 
 | 格式 | 处理方式 | 保留内容 |
 |---|---|---|
-| PDF | 仅翻译已有文字层，不执行 OCR | 图片、矢量线条、页面尺寸和页数 |
+| PDF | 自动选择“智能排版”或“原位保版”；可生成纯译文或中外文对照 PDF | 图片、矢量线条、页面尺寸和页数 |
 | DOCX | 按完整段落翻译正文、表格、页眉和页脚 | 段落、表格和主要字符样式 |
 | XLSX / XLSM | 只翻译字符串单元格 | 公式、数值、样式和工作表结构 |
 | CSV / TSV | 按原编码和分隔符读写 | 行列结构和分隔符 |
@@ -58,6 +67,8 @@
 ### 核心功能
 
 - **保留版式：** 不把文档粗暴转换成纯文本。
+- **双 PDF 引擎：** 报告和说明书可使用 BabelDOC 重建段落与排版；工程图纸和短标签继续使用精确原位替换。
+- **PDF 输出形式：** 可选择纯译文、中外文对照，或同时生成两种 PDF。
 - **技术编号保护：** 图号、物料号、KKS、标准号、尺寸、单位、网址等使用占位符保护。
 - **文件队列：** 支持多文件、文件夹和拖放；已完成文件不会自动重复处理。
 - **长文档容错：** 接口漏掉部分段落时只补译缺失内容，必要时自动拆小批次，不让单次不完整返回报废整份文件。
@@ -69,6 +80,20 @@
 - **缓存与成本控制：** 相同文字跨文件复用；缓存上限 100 MB，超限后自动删除最旧记录并压缩至约 90 MB。
 - **密钥安全：** API Key 使用 Windows DPAPI 加密，只能由当前 Windows 用户读取，不会写入项目或报告。
 
+### 高质量 PDF 引擎
+
+“智能排版”使用可选的 [BabelDOC](https://github.com/funstory-ai/BabelDOC) 后端。它适合报告、手册和连续正文；“原位保版”适合图纸、图签、设备标签和短文本。自动模式会根据文档内容选择，找不到 BabelDOC 时安全回退到原位保版。
+
+安装 BabelDOC 后，在“设置 → 高级 → 高质量引擎”中选择 `babeldoc.exe`。源码环境可使用：
+
+```powershell
+python -m venv .babeldoc-env
+uv pip install --python .babeldoc-env\Scripts\python.exe BabelDOC==0.6.4
+.babeldoc-env\Scripts\babeldoc.exe --warmup
+```
+
+BabelDOC 的程序、布局模型和字体目前约占 1 GB，属于可选程序资源，不计入 100 MB 译文缓存，也不会被缓存清理误删。API Key 通过任务专用临时配置传给本地后端，任务结束立即删除，并从错误信息中脱敏。
+
 ### 术语表格式
 
 前两列分别填写“源术语”和“目标术语”：
@@ -78,7 +103,7 @@ lube oil,润滑油
 bearing pedestal,轴承座
 ```
 
-当前版本使用的是**人工确认的术语表**。自动抽取并审核术语库仍在规划中，缓存不能替代术语库。
+人工确认的术语表会跨文件持续复用。智能 PDF 模式还会调用 BabelDOC 的文档内自动术语提取；可审核、可永久积累的自动术语库仍在规划中，缓存不能替代术语库。
 
 ### 从源码运行
 
@@ -101,6 +126,7 @@ python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
 ### 已知限制
 
 - 扫描图片、PDF转曲文字和没有文字层的页面不会翻译。
+- 智能 PDF 模式需要单独安装 BabelDOC；其首次模型准备时间和磁盘占用高于原位保版模式。
 - 很密集的 PDF 图签或过长译文可能需要缩小字体。
 - DOCX 文本框、SmartArt 和嵌入对象中的文字暂未处理。
 - 旧版 `.doc` 依赖 Microsoft Word。
@@ -137,7 +163,7 @@ General-purpose translators focus on text and may damage tables, drawings, heade
 
 | Format | Processing | Preserved content |
 |---|---|---|
-| PDF | Translates existing text layers only; no OCR | Images, vector drawings, page sizes, and page count |
+| PDF | Automatically selects smart reflow or strict in-place replacement; supports mono and bilingual output | Images, vector drawings, page sizes, and page count |
 | DOCX | Translates body text, tables, headers, and footers with paragraph context | Paragraphs, tables, and primary character styles |
 | XLSX / XLSM | Translates string cells only | Formulas, values, styles, and workbook structure |
 | CSV / TSV | Reads and writes using the detected encoding and delimiter | Rows, columns, and delimiters |
@@ -146,6 +172,8 @@ General-purpose translators focus on text and may damage tables, drawings, heade
 ### Key features
 
 - **Layout preservation:** Documents are not flattened into plain text.
+- **Dual PDF engines:** BabelDOC rebuilds paragraphs for reports and manuals, while strict in-place replacement remains available for drawings and short labels.
+- **PDF output choices:** Generate translated-only, bilingual, or both PDF variants.
 - **Technical-token protection:** Drawing numbers, material IDs, KKS tags, standards, dimensions, units, and URLs are protected with placeholders.
 - **Batch queue:** Supports files, folders, and drag-and-drop. Completed files are not processed again automatically.
 - **Long-document recovery:** Repairs only omitted segments and recursively splits invalid batches instead of failing the whole file.
@@ -156,6 +184,16 @@ General-purpose translators focus on text and may damage tables, drawings, heade
 - **Cache and cost control:** Reuses identical text across files. The cache is capped at 100 MB and compacted to about 90 MB after removing the oldest entries.
 - **API-key security:** The key is encrypted with Windows DPAPI for the current user and is never written to the repository or reports.
 
+### High-quality PDF engine
+
+Smart PDF layout uses the optional [BabelDOC](https://github.com/funstory-ai/BabelDOC) backend. Select its `babeldoc.exe` under **Settings → Advanced → High-quality engine**. Automatic mode uses smart reflow for prose documents and strict placement for drawings, falling back safely when BabelDOC is unavailable.
+
+The backend, layout models, and fonts currently require roughly 1 GB. They are optional application resources, not part of the 100 MB translation cache. The API key is passed through a per-task temporary configuration, deleted after the task, and redacted from backend errors.
+
+### Which download should I choose?
+
+The **Full** archive includes BabelDOC, layout models, and fonts and is ready for smart PDF layout after extracting the complete folder. The smaller **Lite** archive omits BabelDOC and uses strict in-place PDF placement unless you install the engine yourself. Both contain the same application version and support Word, Excel, CSV, and PDF. See [Download Editions](docs/DOWNLOADS.md) for the comparison and manual installation steps.
+
 ### Glossary format
 
 Use the first two columns for the source and target terms:
@@ -165,7 +203,7 @@ lube oil,润滑油
 bearing pedestal,轴承座
 ```
 
-The current version uses **human-approved glossary files**. Automatic terminology extraction and review are planned; the translation cache is not a terminology database.
+Human-approved glossary files are reused across documents. Smart PDF mode also enables BabelDOC's per-document automatic term extraction. A permanent, reviewable auto-built terminology library remains planned; the translation cache is not a terminology database.
 
 ### Run from source
 
@@ -188,6 +226,7 @@ python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
 ### Known limitations
 
 - Scanned images, outlined PDF text, and pages without a text layer are not translated.
+- Smart PDF mode requires a separate BabelDOC installation and uses more disk space than strict placement.
 - Dense PDF title blocks or long translations may require smaller font sizes.
 - Text inside DOCX text boxes, SmartArt, and embedded objects is not currently processed.
 - Legacy `.doc` support requires Microsoft Word.

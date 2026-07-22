@@ -36,7 +36,10 @@ class AppConfig:
     pure_target_language: bool = False
     quality_review: bool = True
     force_refresh: bool = False
-    config_version: int = 2
+    pdf_mode: str = "auto"
+    pdf_output: str = "mono"
+    babeldoc_path: str = ""
+    config_version: int = 3
 
 
 class ConfigStore:
@@ -55,7 +58,11 @@ class ConfigStore:
             # Migrate once, then continue respecting the user's saved choice.
             if int(data.get("config_version", 0)) < 2:
                 allowed["pure_target_language"] = False
-                allowed["config_version"] = 2
+            if int(data.get("config_version", 0)) < 3:
+                allowed.setdefault("pdf_mode", "auto")
+                allowed.setdefault("pdf_output", "mono")
+                allowed.setdefault("babeldoc_path", "")
+            allowed["config_version"] = 3
             return AppConfig(**allowed)
         except Exception:
             return AppConfig()

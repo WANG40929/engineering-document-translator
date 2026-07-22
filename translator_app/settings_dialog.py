@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -31,7 +32,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("设置")
         self.setModal(True)
-        self.resize(640, 520)
+        self.resize(660, 600)
         icon_path = Path(__file__).parent / "assets" / "app_icon.png"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
@@ -114,6 +115,39 @@ class SettingsDialog(QDialog):
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(14)
 
+        self.pdf_mode = QComboBox()
+        self.pdf_mode.addItem("自动选择（推荐）", "auto")
+        self.pdf_mode.addItem("智能排版（报告 / 说明书）", "smart")
+        self.pdf_mode.addItem("原位保版（图纸 / 短标签）", "strict")
+        mode_index = self.pdf_mode.findData(config.pdf_mode)
+        self.pdf_mode.setCurrentIndex(max(0, mode_index))
+        self.pdf_mode.setToolTip("自动模式会根据段落密度选择引擎；未安装 BabelDOC 时使用原位保版。")
+        form.addRow("PDF 处理模式", self.pdf_mode)
+
+        self.pdf_output = QComboBox()
+        self.pdf_output.addItem("纯译文 PDF", "mono")
+        self.pdf_output.addItem("原文 + 译文对照 PDF", "dual")
+        self.pdf_output.addItem("同时生成两种", "both")
+        output_index = self.pdf_output.findData(config.pdf_output)
+        self.pdf_output.setCurrentIndex(max(0, output_index))
+        form.addRow("PDF 输出", self.pdf_output)
+
+        self.babeldoc_edit = QLineEdit(config.babeldoc_path)
+        self.babeldoc_edit.setPlaceholderText("可选：babeldoc.exe；留空则自动查找")
+        choose_backend = QPushButton("选择…")
+        choose_backend.clicked.connect(self._choose_babeldoc)
+        backend_row = QHBoxLayout()
+        backend_row.addWidget(self.babeldoc_edit, 1)
+        backend_row.addWidget(choose_backend)
+        form.addRow("高质量引擎", backend_row)
+
+        backend_note = QLabel(
+            "智能排版需要独立 BabelDOC 后端。程序会自动查找；首次安装的程序与模型资源约 1 GB。"
+        )
+        backend_note.setWordWrap(True)
+        backend_note.setStyleSheet("color:#667085;")
+        form.addRow("", backend_note)
+
         self.batch_size = QSpinBox()
         self.batch_size.setRange(1, 100)
         self.batch_size.setValue(config.batch_size)
@@ -129,7 +163,8 @@ class SettingsDialog(QDialog):
         cache_path = app_data_dir() / "translations.sqlite3"
         cache_size = cache_path.stat().st_size / (1024 * 1024) if cache_path.exists() else 0
         cache = QLabel(
-            f"当前约 {cache_size:.1f} MB\n上限 100 MB，超过后自动按时间清理最早的记录。"
+            f"主程序译文缓存约 {cache_size:.1f} MB，上限 100 MB，超过后按时间清理。\n"
+            "BabelDOC 的布局模型和字体属于程序资源，不是译文缓存，不会被自动删除。"
         )
         cache.setWordWrap(True)
         cache.setStyleSheet("color:#667085; line-height:1.45;")
@@ -181,6 +216,13 @@ class SettingsDialog(QDialog):
         if path:
             self.glossary_edit.setText(path)
 
+    def _choose_babeldoc(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择 BabelDOC 引擎", "", "BabelDOC (babeldoc.exe babeldoc.py);;可执行文件 (*.exe);;所有文件 (*.*)"
+        )
+        if path:
+            self.babeldoc_edit.setText(path)
+
     def values(self) -> dict:
         return {
             "api_key": self.key_edit.text().strip(),
@@ -191,4 +233,7 @@ class SettingsDialog(QDialog):
             "force_refresh": self.force_refresh.isChecked(),
             "batch_size": self.batch_size.value(),
             "request_timeout": self.timeout.value(),
+            "pdf_mode": self.pdf_mode.currentData(),
+            "pdf_output": self.pdf_output.currentData(),
+            "babeldoc_path": self.babeldoc_edit.text().strip(),
         }
