@@ -24,6 +24,9 @@ def main(argv=None) -> int:
     parser.add_argument("--keep-source-language", action="store_true", help="允许译文保留源语言对照")
     parser.add_argument("--no-quality-review", action="store_true", help="关闭残留源语言自动复核")
     parser.add_argument("--force-refresh", action="store_true", help="忽略翻译缓存")
+    parser.add_argument("--pdf-mode", choices=("auto", "smart", "strict"), default="auto")
+    parser.add_argument("--pdf-output", choices=("mono", "dual", "both"), default="mono")
+    parser.add_argument("--babeldoc-path", type=Path)
     args = parser.parse_args(argv)
     files: list[Path] = []
     for value in args.paths:
@@ -38,6 +41,9 @@ def main(argv=None) -> int:
         pure_target_language=not args.keep_source_language,
         quality_review=not args.no_quality_review,
         force_refresh=args.force_refresh,
+        pdf_mode=args.pdf_mode,
+        pdf_output=args.pdf_output,
+        babeldoc_path=args.babeldoc_path,
     )
     translator = DeepSeekTranslator(
         key, args.model, args.source, args.target, load_glossary(args.glossary), TranslationCache(),

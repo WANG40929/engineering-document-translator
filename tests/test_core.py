@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,6 +18,7 @@ from translator_app.config import ConfigStore
 from translator_app.deepseek import DeepSeekError, DeepSeekTranslator, IdentityTranslator, IncompleteResponseError
 from translator_app.engines.csv_engine import CsvEngine
 from translator_app.engines.docx_engine import DocxEngine
+from translator_app.engines.babeldoc_engine import BabelDocEngine
 from translator_app.engines.pdf_engine import PdfEngine
 from translator_app.engines.xlsx_engine import XlsxEngine
 from translator_app.models import TranslationOptions
@@ -193,6 +195,86 @@ class CoreTests(unittest.TestCase):
         path = self.root / "config-v2.json"
         path.write_text('{"config_version":2,"pure_target_language":true}', encoding="utf-8")
         self.assertTrue(ConfigStore(path).load().pure_target_language)
+
+    def test_v2_config_gains_safe_pdf_defaults(self):
+        path = self.root / "config-v2-pdf.json"
+        path.write_text('{"config_version":2,"model":"deepseek-v4-flash"}', encoding="utf-8")
+        config = ConfigStore(path).load()
+        self.assertEqual(config.pdf_mode, "auto")
+        self.assertEqual(config.pdf_output, "mono")
+        self.assertEqual(config.config_version, 3)
+
+    def test_smart_pdf_backend_generates_mono_and_dual_without_key_in_argv(self):
+        source, output = self.root / "report.pdf", self.root / "report_ZH.pdf"
+        document = fitz.open()
+        document.new_page(width=400, height=300).insert_text((30, 50), "Long report paragraph for translation", fontsize=12)
+        document.save(source)
+        document.close()
+        fake = self.root / "fake_babeldoc.py"
+        fake.write_text(
+            """import argparse
+from pathlib import Path
+import fitz
+p = argparse.ArgumentParser()
+p.add_argument('--config'); p.add_argument('--files'); p.add_argument('--output')
+p.add_argument('--working-dir'); p.add_argument('--lang-in'); p.add_argument('--lang-out')
+a, rest = p.parse_known_args()
+assert 'sk-super-secret' not in ' '.join(__import__('sys').argv)
+assert 'sk-super-secret' in Path(a.config).read_text(encoding='utf-8')
+out = Path(a.output); out.mkdir(parents=True, exist_ok=True)
+for kind in ('mono', 'dual'):
+    d = fitz.open(); d.new_page(width=300, height=200).insert_text((20, 40), kind)
+    d.save(out / f'sample.no_watermark.zh.{kind}.pdf'); d.close()
+print('Translate Paragraphs 65%')
+print('Save PDF 100%')
+""",
+            encoding="utf-8",
+        )
+
+        class SmartTranslator:
+            api_key = "sk-super-secret"
+            base_url = "https://api.deepseek.com/chat/completions"
+            usage = {}
+
+        options = TranslationOptions(
+            target_language="zh", model="deepseek-v4-flash", pdf_mode="smart",
+            pdf_output="both", babeldoc_path=fake,
+        )
+        updates = []
+        result = BabelDocEngine().translate(
+            source, output, SmartTranslator(), options,
+            lambda _file, fraction, message: updates.append((fraction, message)),
+        )
+        self.assertEqual(result.status, "completed", result.errors)
+        self.assertTrue(output.exists())
+        self.assertEqual(len(result.additional_outputs), 1)
+        self.assertTrue(Path(result.additional_outputs[0]).exists())
+        self.assertEqual(updates[-1][0], 1.0)
+
+    def test_auto_pdf_mode_uses_smart_only_for_prose_when_available(self):
+        pipeline = TranslationPipeline()
+        source = self.root / "sample.pdf"
+        source.touch()
+        options = TranslationOptions(pdf_mode="auto", babeldoc_path=Path(sys.executable))
+        with patch.object(BabelDocEngine, "looks_like_prose", return_value=True):
+            self.assertIs(pipeline.engine_for(source, options), pipeline.smart_pdf_engine)
+        with patch.object(BabelDocEngine, "looks_like_prose", return_value=False):
+            self.assertIs(pipeline.engine_for(source, options), pipeline.strict_pdf_engine)
+
+    def test_babeldoc_progress_maps_stages_and_rich_ratio(self):
+        self.assertGreaterEqual(
+            BabelDocEngine._progress_from_output("Translate Paragraphs", 0.1), 0.48
+        )
+        self.assertEqual(
+            BabelDocEngine._progress_from_output("translate 73.0/100", 0.2), 0.73
+        )
+
+    def test_babeldoc_glossary_csv_has_required_columns(self):
+        path = self.root / "glossary.csv"
+        BabelDocEngine._write_glossary(path, {"bearing": "轴承"}, "zh")
+        with path.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(rows, [{"source": "bearing", "target": "轴承", "tgt_lng": "zh"}])
 
     def test_quality_review_retries_real_words_but_not_short_codes(self):
         class ReviewDeepSeek(DeepSeekTranslator):

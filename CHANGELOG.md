@@ -4,6 +4,30 @@
 
 This project follows semantic versioning. Stable builds are available from [GitHub Releases](https://github.com/WANG40929/engineering-document-translator/releases).
 
+## 1.2.0
+
+### 中文
+
+- 新增双 PDF 引擎：报告和说明书可使用 BabelDOC 智能重建段落，图纸和短标签保留原位保版模式。
+- PDF 可输出纯译文、中外文对照，或同时生成两种文件；附加输出会写入任务报告。
+- 自动模式根据段落密度选择引擎；未安装 BabelDOC 时自动回退，不影响原有格式。
+- 接入 BabelDOC 真实处理阶段、进度与停止检查，大文件按最多40页分段处理。
+- DeepSeek Key 使用任务专用临时配置传递，结束即删除，后端错误统一脱敏。
+- CSV、TSV、TXT、XLSX 术语表都会转换成 BabelDOC 标准术语格式并在智能 PDF 中使用。
+- 区分100 MB译文缓存与约1 GB可选布局模型资源，模型不会被缓存清理误删。
+- GitHub Release 同时提供内置 BabelDOC 的完整版和不含 BabelDOC 的轻量版，并新增独立的中英文安装说明。
+
+### English
+
+- Added dual PDF engines: BabelDOC smart paragraph reconstruction for reports and manuals, plus strict in-place placement for drawings and short labels.
+- Added translated-only, bilingual, and combined PDF output choices with additional outputs recorded in reports.
+- Added automatic engine routing with safe fallback when BabelDOC is unavailable.
+- Connected backend stages, progress, stop checks, and 40-page splitting for large documents.
+- Passed the DeepSeek key through a per-task temporary configuration and redacted backend errors.
+- Converted all supported glossary formats into BabelDOC's standard glossary schema.
+- Separated the 100 MB translation cache from optional layout-model resources.
+- Added Full and Lite Windows release archives plus bilingual engine-installation instructions.
+
 ## 1.1.1
 
 ### 中文

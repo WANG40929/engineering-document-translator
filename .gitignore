@@ -10,6 +10,8 @@ __pycache__/
 venv/
 .qt-deps/
 .build-deps/
+.babeldoc-env/
+release/
 tcl_debug/
 tcl_min/
 

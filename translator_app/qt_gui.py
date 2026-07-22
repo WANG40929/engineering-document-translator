@@ -733,6 +733,9 @@ class TranslatorWindow(QMainWindow):
         self.saved.force_refresh = values["force_refresh"]
         self.saved.batch_size = values["batch_size"]
         self.saved.request_timeout = values["request_timeout"]
+        self.saved.pdf_mode = values["pdf_mode"]
+        self.saved.pdf_output = values["pdf_output"]
+        self.saved.babeldoc_path = values["babeldoc_path"]
         self.saved.model = self.model_combo.currentData() or self.model_combo.currentText().strip()
         self.saved.source_language = self.source_combo.currentData()
         self.saved.target_language = self.target_combo.currentData()
@@ -910,6 +913,9 @@ class TranslatorWindow(QMainWindow):
             pure_target_language=self.saved.pure_target_language,
             quality_review=self.saved.quality_review,
             force_refresh=self.saved.force_refresh,
+            pdf_mode=self.saved.pdf_mode,
+            pdf_output=self.saved.pdf_output,
+            babeldoc_path=Path(self.saved.babeldoc_path) if self.saved.babeldoc_path else None,
         )
         pending = {str(path.resolve()) for path in paths}
         for row in range(self.table.rowCount()):
