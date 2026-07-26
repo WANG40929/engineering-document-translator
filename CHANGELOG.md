@@ -20,11 +20,13 @@ This project follows semantic versioning. Stable builds are available from [GitH
 - 运行中关闭窗口会先停止任务并清理后台引擎；修复最小窗口下的控件重叠和多语言截字。
 - 保持 100 MB 译文缓存上限不变，超限后仍按时间清理最旧记录。
 - 修正多语言输出文件识别，避免已翻译文件被再次加入任务。
+- Windows 安装程序现已内置简体中文语言包，并在每次启动时按 Windows 界面语言自动选择，避免旧安装程序记住非中文选项。
 
 ### English
 
 - Added Simplified Chinese, English, Russian, Spanish, French, and German interfaces with automatic Windows-language detection and a manual setting.
 - Added Windows Setup Full, Portable Full, and Portable Lite editions; Setup Full includes BabelDOC by default.
+- The Windows installer now includes Simplified Chinese and detects the Windows UI language on every launch, preventing an older non-Chinese choice from being carried forward.
 - Switched release and internal filenames to ASCII-safe names and included readable `ReadMe.html` and `ReadMe.txt` files.
 - Reduced launch delay with a folder-based build, lazy loading of translation components, and a lightweight splash screen.
 - Added real PDF stage progress for parsing, layout analysis, terminology, translation, typesetting, fonts, and saving, together with a dynamic ETA.

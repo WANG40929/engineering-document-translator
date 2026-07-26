@@ -94,7 +94,11 @@ function Add-LegalFiles {
         -Destination (Join-Path $legalRoot "LICENSE.txt")
     Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.md") `
         -Destination (Join-Path $legalRoot "THIRD_PARTY_NOTICES.txt")
-    foreach ($licenseName in @("GPL-3.0.txt", "LGPL-3.0.txt")) {
+    foreach ($licenseName in @(
+        "GPL-3.0.txt",
+        "LGPL-3.0.txt",
+        "InnoSetup-License.txt"
+    )) {
         Copy-Item -LiteralPath (Join-Path $projectRoot "installer\licenses\$licenseName") `
             -Destination (Join-Path $legalRoot $licenseName)
     }

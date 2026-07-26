@@ -49,7 +49,10 @@ CloseApplications=yes
 CloseApplicationsFilter={#MyAppExeName}
 RestartApplications=no
 UsePreviousAppDir=yes
-UsePreviousLanguage=yes
+; Detect the Windows UI language every time. This avoids carrying forward a
+; non-Chinese choice made with an older installer that did not offer Chinese.
+UsePreviousLanguage=no
+LanguageDetectionMethod=uilanguage
 ChangesAssociations=no
 ChangesEnvironment=no
 DisableWelcomePage=no
@@ -61,11 +64,11 @@ VersionInfoCopyright=Copyright (c) 2026
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
-; Simplified Chinese became an official bundled translation in Inno Setup 7.
-; Keep the script compatible with Inno Setup 6, where that file is absent.
-#if FileExists(CompilerPath + "Languages\ChineseSimplified.isl")
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
-#endif
+; Vendor the Inno Setup 6.5.0+ Simplified Chinese catalog with the project so
+; every developer and CI build produces the same six-language installer.
+; Default.isl is the forward-compatible fallback if a future Inno version adds
+; messages that the translated catalog has not received yet.
+Name: "chinesesimplified"; MessagesFile: "compiler:Default.isl,languages\ChineseSimplified.isl"
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
 Name: "french"; MessagesFile: "compiler:Languages\French.isl"

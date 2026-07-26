@@ -4,8 +4,8 @@
 
 ### 自动化测试
 
-- **结果：56 项全部通过。**
-- 覆盖范围包括 PDF、DOCX、XLSX、CSV、Excel 内嵌图片、缓存清理、配置迁移、密钥保护、占位符修复、截断 JSON 拆分、失败重试、并行批次、限速恢复、PDF 多输出复用、内置引擎优先级、后台进程清理、PDF 阶段进度、界面多语言和最小窗口布局。
+- **结果：58 项全部通过。**
+- 覆盖范围包括 PDF、DOCX、XLSX、CSV、Excel 内嵌图片、缓存清理、配置迁移、密钥保护、占位符修复、截断 JSON 拆分、失败重试、并行批次、限速恢复、PDF 多输出复用、内置引擎优先级、后台进程清理、PDF 阶段进度、界面多语言、最小窗口布局和安装器中文配置。
 
 ### 真实 PDF 回归
 
@@ -24,11 +24,12 @@ v1.3.0 的核心翻译流程、真实 PDF 进度、版式安全检查和六种�
 
 ### Windows 成品验证
 
-- 免安装轻量版：67.80 MiB；免安装完整版：506.10 MiB；安装完整版：314.64 MiB。
+- 免安装轻量版：67.80 MiB；免安装完整版：506.10 MiB；安装完整版：314.66 MiB。
 - 全新免安装构建显示启动画面约 2.37 秒、主窗口约 2.65 秒；安装版主窗口约 2.31 秒。
 - 两个 ZIP 均通过完整 CRC 检查，内部没有非 ASCII 或不安全路径。
 - 完整版与安装版内置 BabelDOC 0.6.4；Excel 图片所需的 Pillow 及许可证已包含。
-- 安装测试用时约 42.42 秒，卸载约 5.10 秒，退出码均为 0，卸载后安装目录完整删除。
+- 安装器无参数启动时自动选择简体中文，语言列表完整显示六种语言；欢迎页、按钮和退出提示均通过中文界面检查。
+- 中文静默安装测试用时约 46.47 秒，卸载约 5.16 秒，退出码均为 0，卸载后安装目录完整删除。
 
 ---
 
@@ -36,8 +37,8 @@ v1.3.0 的核心翻译流程、真实 PDF 进度、版式安全检查和六种�
 
 ### Automated tests
 
-- **Result: all 56 tests passed.**
-- Coverage includes PDF, DOCX, XLSX, CSV, embedded Excel images, cache cleanup, configuration migration, key protection, placeholder recovery, truncated-JSON splitting, retry behavior, concurrent batches, rate-limit recovery, duplicate multi-output PDFs, bundled-engine precedence, background-process cleanup, PDF stage progress, interface localization, and minimum-window layout.
+- **Result: all 58 tests passed.**
+- Coverage includes PDF, DOCX, XLSX, CSV, embedded Excel images, cache cleanup, configuration migration, key protection, placeholder recovery, truncated-JSON splitting, retry behavior, concurrent batches, rate-limit recovery, duplicate multi-output PDFs, bundled-engine precedence, background-process cleanup, PDF stage progress, interface localization, minimum-window layout, and installer localization.
 
 ### Real-PDF regression
 
@@ -56,8 +57,9 @@ The v1.3.0 core translation flow, real PDF progress, layout-safety checks, and a
 
 ### Windows artifact verification
 
-- Portable Lite: 67.80 MiB; Portable Full: 506.10 MiB; Setup Full: 314.64 MiB.
+- Portable Lite: 67.80 MiB; Portable Full: 506.10 MiB; Setup Full: 314.66 MiB.
 - A fresh portable build showed the splash at about 2.37 seconds and the main window at about 2.65 seconds; the installed main window appeared at about 2.31 seconds.
 - Both ZIP files passed complete CRC checks and contained no non-ASCII or unsafe paths.
 - Full and Setup include BabelDOC 0.6.4; Pillow and its license are bundled for embedded Excel-image preservation.
-- Installation took about 42.42 seconds and uninstallation about 5.10 seconds. Both returned code 0, and the installation directory was removed completely.
+- Without a language argument, Setup automatically selected Simplified Chinese and displayed all six languages; the welcome page, buttons, and exit prompt were verified in Chinese.
+- A silent Chinese installation took about 46.47 seconds and uninstallation about 5.16 seconds. Both returned code 0, and the installation directory was removed completely.

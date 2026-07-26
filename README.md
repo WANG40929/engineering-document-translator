@@ -41,6 +41,8 @@ v1.3.0 提供三种 Windows 版本：
 | **Portable Full（免安装完整版）** | 是 | 不希望安装；解压完整文件夹后使用 |
 | **Portable Lite（免安装轻量版）** | 否 | 主要翻译 Word、Excel、CSV、图纸或短标签 PDF；也可自行安装 BabelDOC |
 
+安装向导支持简体中文、英语、俄语、西班牙语、法语和德语，并在每次启动时按 Windows 界面语言自动选择。
+
 安装包和压缩包名称均使用英文、数字等 ASCII 字符，避免在不同解压软件中出现乱码。每个发布包都提供浏览器可直接打开的 `ReadMe.html` 和普通文本 `ReadMe.txt`，不要求用户会打开 Markdown 文件。详细区别和 Lite 版安装引擎的方法见 [下载版本说明](docs/DOWNLOADS.md)。
 
 ### 开始使用
@@ -131,6 +133,8 @@ Version 1.3.0 provides three Windows editions:
 | **Windows Setup Full** | Yes | Recommended for most users; guided installation with the engine included by default |
 | **Portable Full** | Yes | No installation; extract the complete folder before use |
 | **Portable Lite** | No | Word, Excel, CSV, drawings, and short-label PDFs; BabelDOC can be installed separately |
+
+The setup wizard supports Simplified Chinese, English, Russian, Spanish, French, and German, and detects the Windows UI language on every launch.
 
 Package and archive names use ASCII characters to prevent garbled filenames in older archive tools. Every package contains a browser-friendly `ReadMe.html` and plain-text `ReadMe.txt`; users do not need a Markdown reader. See [Download Editions](docs/DOWNLOADS.md) for details and Lite-edition engine setup.
 

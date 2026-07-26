@@ -62,6 +62,8 @@ Release design
 - The application uses PyInstaller onedir, not onefile, to improve cold start.
 - Runtime files use the descriptive ASCII folder ApplicationFiles.
 - Full editions use TranslationEngine; Lite does not contain it.
+- The installer vendors its Simplified Chinese catalog and automatically
+  selects the current Windows UI language.
 - User documentation is ReadMe.html and ReadMe.txt, not Markdown.
 - Legal files are collected under Legal.
 - ZIP entry names are validated as ASCII to avoid Windows locale mojibake.

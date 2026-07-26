@@ -21,6 +21,10 @@ Python packages into `Legal/ThirdPartyLicenses`.
 - CPython 3.12 runtime (bundled with BabelDOC): Python Software Foundation
   License
   - Source: https://www.python.org/downloads/source/
+- Inno Setup (Windows Setup edition only): Inno Setup License
+  - Source: https://github.com/jrsoftware/issrc
+  - The installer uses the upstream Simplified Chinese message catalog
+    maintained by Zhenghan Yang (Kira).
 - Zotero PDF2zh (workflow reference only; no plugin code is bundled):
   GNU AGPL 3.0
   - Source: https://github.com/guaguastandup/zotero-pdf2zh

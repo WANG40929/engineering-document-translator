@@ -10,6 +10,8 @@ v1.3.0 提供三种 Windows 交付方式。三者使用相同的主程序和翻�
 | **Portable Full** | 与安装完整版相同，但不写入系统安装目录 | 需要完整功能但不希望安装 | 解压完整文件夹，运行 `DocumentTranslator.exe` |
 | **Portable Lite** | 主程序，不含 BabelDOC | Word、Excel、CSV、图纸、短标签 PDF，或自行管理 BabelDOC 的用户 | 解压完整文件夹，运行 `DocumentTranslator.exe` |
 
+Setup Full 的安装向导提供简体中文、英语、俄语、西班牙语、法语和德语，并在每次启动时按 Windows 界面语言自动选择。
+
 ### 选择建议
 
 - 不确定选哪个：选择 **Windows Setup Full**。它默认内置智能 PDF 引擎。
@@ -60,6 +62,8 @@ Version 1.3.0 provides three Windows delivery options. All three use the same ma
 | **Windows Setup Full** | Application, BabelDOC smart PDF engine, layout models, and fonts | Recommended for most users, especially reports, manuals, and prose-heavy PDFs | Run the installer and follow the setup wizard |
 | **Portable Full** | The same full feature set without system installation | Complete features on a portable or restricted computer | Extract the complete folder and run `DocumentTranslator.exe` |
 | **Portable Lite** | Application without BabelDOC | Word, Excel, CSV, drawings, short-label PDFs, or separately managed BabelDOC installations | Extract the complete folder and run `DocumentTranslator.exe` |
+
+The Setup Full wizard offers Simplified Chinese, English, Russian, Spanish, French, and German, and detects the Windows UI language on every launch.
 
 ### Which edition should I choose?
 
