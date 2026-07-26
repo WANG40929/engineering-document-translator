@@ -12,6 +12,8 @@ from unittest.mock import patch
 import fitz
 from docx import Document
 from openpyxl import Workbook, load_workbook
+from openpyxl.drawing.image import Image as SpreadsheetImage
+from PIL import Image as RasterImage
 
 from translator_app.cache import TranslationCache
 from translator_app.config import ConfigStore
@@ -21,7 +23,8 @@ from translator_app.engines.docx_engine import DocxEngine
 from translator_app.engines.babeldoc_engine import BabelDocEngine
 from translator_app.engines.pdf_engine import PdfEngine
 from translator_app.engines.xlsx_engine import XlsxEngine
-from translator_app.models import TranslationOptions
+from translator_app.file_types import collect_files
+from translator_app.models import FileResult, TranslationOptions
 from translator_app.pipeline import TranslationPipeline
 from translator_app.secret_store import SecretStore
 from translator_app.text_utils import is_translatable, protect_text
@@ -98,6 +101,65 @@ class CoreTests(unittest.TestCase):
         translator = SplitDeepSeek("test-key", cache=TranslationCache(self.root / "split.sqlite3"))
         self.assertEqual(translator.translate_many(["First segment", "Second segment"]), ["单段译文", "单段译文"])
         self.assertGreaterEqual(translator.usage["split_retries"], 1)
+
+    def test_api_splits_truncated_json_instead_of_repeating_large_batch(self):
+        class FakeResponse:
+            def __init__(self, payload):
+                self.payload = payload
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self):
+                return json.dumps(self.payload, ensure_ascii=False).encode("utf-8")
+
+        request_sizes = []
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            body = json.loads(request.data.decode("utf-8"))
+            segments = json.loads(body["messages"][1]["content"])["segments"]
+            request_sizes.append(len(segments))
+            if len(segments) > 1:
+                content = '{"translations":['
+                finish_reason = "length"
+            else:
+                item = segments[0]
+                content = json.dumps(
+                    {
+                        "translations": [
+                            {"id": item["id"], "text": f"译文{item['id']}"}
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+                finish_reason = "stop"
+            return FakeResponse(
+                {
+                    "choices": [
+                        {
+                            "finish_reason": finish_reason,
+                            "message": {"content": content},
+                        }
+                    ],
+                    "usage": {},
+                }
+            )
+
+        translator = DeepSeekTranslator(
+            "test-key",
+            cache=TranslationCache(self.root / "truncated-json.sqlite3"),
+            quality_review=False,
+        )
+        with patch(
+            "translator_app.deepseek.urllib.request.urlopen",
+            side_effect=fake_urlopen,
+        ):
+            result = translator.translate_many(
+                ["First ordinary segment", "Second ordinary segment"]
+            )
+        self.assertEqual(result, ["译文0", "译文1"])
+        self.assertEqual(request_sizes, [2, 1, 1])
+        self.assertEqual(translator.usage["schema_failures"], 1)
+        self.assertEqual(translator.usage["split_retries"], 1)
 
     def test_api_disables_thinking_and_records_finish_reason(self):
         class FakeResponse:
@@ -202,7 +264,25 @@ class CoreTests(unittest.TestCase):
         config = ConfigStore(path).load()
         self.assertEqual(config.pdf_mode, "auto")
         self.assertEqual(config.pdf_output, "mono")
-        self.assertEqual(config.config_version, 3)
+        self.assertEqual(config.config_version, 4)
+
+    def test_folder_import_skips_generated_outputs_for_every_supported_language(self):
+        source = self.root / "manual.pdf"
+        source.touch()
+        for name in (
+            "manual_ZH.pdf",
+            "manual_EN_2.pdf",
+            "manual_RU_DUAL.pdf",
+            "manual_DE.pdf",
+            "manual_FR.pdf",
+            "manual_ES.pdf",
+            "manual_PT.pdf",
+            "manual_JA.pdf",
+            "manual_KO.pdf",
+            "manual.no_watermark.zh-CN.mono.pdf",
+        ):
+            (self.root / name).touch()
+        self.assertEqual(collect_files(self.root), [source])
 
     def test_smart_pdf_backend_generates_mono_and_dual_without_key_in_argv(self):
         source, output = self.root / "report.pdf", self.root / "report_ZH.pdf"
@@ -260,6 +340,48 @@ print('Save PDF 100%')
             self.assertIs(pipeline.engine_for(source, options), pipeline.smart_pdf_engine)
         with patch.object(BabelDocEngine, "looks_like_prose", return_value=False):
             self.assertIs(pipeline.engine_for(source, options), pipeline.strict_pdf_engine)
+
+    def test_duplicate_pdf_reuse_copies_primary_and_additional_outputs(self):
+        first = self.root / "first.pdf"
+        second = self.root / "second.pdf"
+        first.write_bytes(b"identical-pdf-content")
+        second.write_bytes(b"identical-pdf-content")
+
+        class MultiOutputEngine:
+            calls = 0
+            def translate(inner, source, destination, translator, options, progress=None):
+                del source, translator, options, progress
+                inner.calls += 1
+                destination.write_bytes(b"mono")
+                dual = destination.with_name(f"{destination.stem}_DUAL.pdf")
+                dual.write_bytes(b"dual")
+                return FileResult(
+                    input_path=str(first),
+                    output_path=str(destination),
+                    status="completed",
+                    engine="test",
+                    translated_units=7,
+                    additional_outputs=[str(dual)],
+                )
+
+        pipeline = TranslationPipeline()
+        engine = MultiOutputEngine()
+        with patch.object(pipeline, "engine_for", return_value=engine):
+            results = pipeline.run(
+                [first, second],
+                IdentityTranslator(),
+                TranslationOptions(target_language="zh", pdf_output="both"),
+            )
+        self.assertEqual(engine.calls, 1)
+        self.assertEqual([result.status for result in results], ["completed", "completed"])
+        self.assertEqual(results[1].translated_units, 7)
+        self.assertEqual(len(results[1].additional_outputs), 1)
+        self.assertEqual(Path(results[1].output_path).read_bytes(), b"mono")
+        self.assertEqual(Path(results[1].additional_outputs[0]).read_bytes(), b"dual")
+        self.assertEqual(
+            Path(results[1].additional_outputs[0]).name,
+            "second_ZH_DUAL.pdf",
+        )
 
     def test_babeldoc_progress_maps_stages_and_rich_ratio(self):
         self.assertGreaterEqual(
@@ -523,6 +645,33 @@ print('Save PDF 100%')
         self.assertTrue(translated.active["A1"].value.startswith("中译："))
         self.assertEqual(translated.active["C1"].value, "=B1*2")
         translated.close()
+
+    def test_xlsx_preserves_embedded_image(self):
+        source, output = self.root / "image.xlsx", self.root / "image_ZH.xlsx"
+        image_path = self.root / "sample-image.png"
+        with RasterImage.new("RGB", (18, 12), (31, 103, 232)) as raster:
+            raster.save(image_path)
+        book = Workbook()
+        sheet = book.active
+        sheet["A1"] = "Equipment image"
+        sheet.add_image(SpreadsheetImage(str(image_path)), "D4")
+        book.save(source)
+        book.close()
+
+        result = XlsxEngine().translate(
+            source,
+            output,
+            PrefixTranslator(),
+            self.options,
+        )
+        self.assertEqual(result.status, "completed")
+        translated = load_workbook(output, data_only=False)
+        try:
+            self.assertEqual(len(translated.active._images), 1)
+            anchor = translated.active._images[0].anchor._from
+            self.assertEqual((anchor.col, anchor.row), (3, 3))
+        finally:
+            translated.close()
 
     def test_csv_preserves_shape(self):
         source, output = self.root / "sample.csv", self.root / "sample_ZH.csv"

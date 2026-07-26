@@ -7,6 +7,7 @@ from pathlib import Path
 
 import fitz
 
+from ..i18n import tr
 from ..models import FileResult, ProgressCallback, TranslationOptions
 from ..text_utils import is_translatable, normalize_text
 from .base import TranslationEngine
@@ -143,6 +144,240 @@ class PdfEngine(TranslationEngine):
             candidate_size = max(floor, candidate_size * 0.94)
         return False, candidate_size
 
+    def _apply_page_translations(
+        self,
+        page,
+        page_index: int,
+        lines: list[dict],
+        translations: list[str],
+        options: TranslationOptions,
+        result: FileResult,
+    ) -> None:
+        for line in lines:
+            page.add_redact_annot(line["rect"], fill=False, cross_out=False)
+        page.apply_redactions(images=0, graphics=0, text=0)
+        for line, translated in zip(lines, translations):
+            inserted, used_size = self._insert_fitted(
+                page,
+                line,
+                translated,
+                options.minimum_pdf_font_size,
+            )
+            if not inserted:
+                result.warnings.append(
+                    tr(
+                        "warning.pdf_text_overflow",
+                        page=page_index + 1,
+                        text=line["text"][:60],
+                    )
+                )
+            elif used_size < options.minimum_pdf_font_size:
+                result.warnings.append(
+                    tr(
+                        "warning.pdf_font_reduced",
+                        page=page_index + 1,
+                        size=used_size,
+                        text=line["text"][:60],
+                    )
+                )
+            result.translated_units += 1
+
+    def _translate_aggregated(
+        self,
+        source: Path,
+        document,
+        page_lines: list[list[dict]],
+        translator,
+        options: TranslationOptions,
+        progress: ProgressCallback | None,
+        result: FileResult,
+    ) -> None:
+        """Translate all text together, falling back by page on any failure."""
+        total_pages = len(page_lines)
+        total_units = sum(len(lines) for lines in page_lines)
+        last_fraction = 0.05
+
+        def emit(fraction: float, message: str) -> None:
+            nonlocal last_fraction
+            last_fraction = max(last_fraction, min(0.99, float(fraction)))
+            if progress:
+                progress(str(source), last_fraction, message)
+
+        for page_index, lines in enumerate(page_lines):
+            if not lines:
+                result.skipped_pages.append(page_index + 1)
+                result.skipped_units += 1
+        emit(
+            0.05,
+            tr("progress.pdf_analyzed", pages=total_pages, segments=total_units),
+        )
+        if not total_units:
+            for page_index in range(total_pages):
+                emit(
+                    0.90 + 0.08 * ((page_index + 1) / max(total_pages, 1)),
+                    tr(
+                        "progress.pdf_no_text",
+                        current=page_index + 1,
+                        total=total_pages,
+                    ),
+                )
+            emit(0.99, tr("progress.pdf_save"))
+            return
+
+        flat_texts = [
+            line["text"]
+            for lines in page_lines
+            for line in lines
+        ]
+
+        def aggregate_progress(done: int, pending_total: int) -> None:
+            if pending_total <= 0:
+                return
+            translated_ratio = min(1.0, done / pending_total)
+            emit(
+                0.05 + 0.75 * translated_ratio,
+                tr(
+                    "progress.pdf_translating_document",
+                    done=done,
+                    total=pending_total,
+                    pages=total_pages,
+                    segments=total_units,
+                ),
+            )
+
+        try:
+            flat_translations = translator.translate_many(
+                flat_texts,
+                progress=aggregate_progress,
+            )
+            if len(flat_translations) != len(flat_texts):
+                raise RuntimeError(
+                    tr(
+                        "error.pdf_document_count",
+                        actual=len(flat_translations),
+                        expected=len(flat_texts),
+                    )
+                )
+        except Exception as aggregate_error:
+            # DeepSeekTranslator checkpoints every successful batch. Retrying
+            # page-by-page therefore reads completed text from cache and sends
+            # only the unresolved part, while restoring exact page diagnostics.
+            emit(
+                last_fraction,
+                tr("progress.pdf_batch_recovering"),
+            )
+            translations_by_page: list[list[str]] = [[] for _ in page_lines]
+            verified_units = 0
+            for page_index, lines in enumerate(page_lines):
+                if not lines:
+                    continue
+
+                def page_progress(done: int, pending_total: int) -> None:
+                    if pending_total <= 0:
+                        return
+                    page_ratio = min(1.0, done / pending_total)
+                    candidate_units = verified_units + round(len(lines) * page_ratio)
+                    emit(
+                        0.05 + 0.75 * (candidate_units / max(total_units, 1)),
+                        tr(
+                            "progress.pdf_recovering_page",
+                            current=page_index + 1,
+                            pages=total_pages,
+                            done=done,
+                            total=pending_total,
+                        ),
+                    )
+
+                try:
+                    page_translations = translator.translate_many(
+                        [line["text"] for line in lines],
+                        progress=page_progress,
+                    )
+                    if len(page_translations) != len(lines):
+                        raise RuntimeError(
+                            tr(
+                                "error.pdf_page_count",
+                                actual=len(page_translations),
+                                expected=len(lines),
+                            )
+                        )
+                except Exception as page_error:
+                    raise RuntimeError(
+                        tr(
+                            "error.pdf_page_failed",
+                            current=page_index + 1,
+                            total=total_pages,
+                            done=verified_units,
+                            segments=total_units,
+                            reason=page_error,
+                        )
+                    ) from page_error
+                translations_by_page[page_index] = list(page_translations)
+                verified_units += len(lines)
+                emit(
+                    0.05 + 0.75 * (verified_units / max(total_units, 1)),
+                    tr(
+                        "progress.pdf_page_recovered",
+                        current=page_index + 1,
+                        pages=total_pages,
+                        done=verified_units,
+                        total=total_units,
+                    ),
+                )
+            flat_translations = [
+                translated
+                for translations in translations_by_page
+                for translated in translations
+            ]
+            if len(flat_translations) != len(flat_texts):
+                raise RuntimeError(tr("error.pdf_recovery_incomplete")) from aggregate_error
+
+        emit(
+            0.80,
+            tr(
+                "progress.pdf_translation_ready",
+                pages=total_pages,
+                segments=total_units,
+            ),
+        )
+        translation_offset = 0
+        applied_units = 0
+        for page_index, lines in enumerate(page_lines):
+            if not lines:
+                emit(
+                    0.80 + 0.18 * (applied_units / max(total_units, 1)),
+                    tr(
+                        "progress.pdf_no_text",
+                        current=page_index + 1,
+                        total=total_pages,
+                    ),
+                )
+                continue
+            page_translations = flat_translations[
+                translation_offset : translation_offset + len(lines)
+            ]
+            translation_offset += len(lines)
+            self._apply_page_translations(
+                document[page_index],
+                page_index,
+                lines,
+                page_translations,
+                options,
+                result,
+            )
+            applied_units += len(lines)
+            emit(
+                0.80 + 0.18 * (applied_units / max(total_units, 1)),
+                tr(
+                    "progress.pdf_writing_page",
+                    current=page_index + 1,
+                    pages=total_pages,
+                    done=applied_units,
+                    total=total_units,
+                ),
+            )
+        emit(0.99, tr("progress.pdf_finalize"))
+
     def translate(self, source, destination, translator, options, progress=None) -> FileResult:
         started = time.monotonic()
         result = FileResult(str(source), str(destination), engine="PDF text layer")
@@ -154,8 +389,33 @@ class PdfEngine(TranslationEngine):
             page_lines = [self._page_lines(document[index]) for index in range(total_pages)]
             total_units = sum(len(lines) for lines in page_lines)
             completed_units = 0
+            if getattr(translator, "supports_parallel_batches", False):
+                self._translate_aggregated(
+                    source,
+                    document,
+                    page_lines,
+                    translator,
+                    options,
+                    progress,
+                    result,
+                )
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                document.subset_fonts()
+                document.save(destination, garbage=3, deflate=True, clean=False)
+                result.status = "completed"
+                if progress:
+                    progress(str(source), 1.0, tr("progress.pdf_generated_strict"))
+                return result
             if progress:
-                progress(str(source), 0.0, f"已分析 PDF：{total_pages} 页，共 {total_units} 个文字段落")
+                progress(
+                    str(source),
+                    0.0,
+                    tr(
+                        "progress.pdf_analyzed",
+                        pages=total_pages,
+                        segments=total_units,
+                    ),
+                )
             for page_index in range(total_pages):
                 page = document[page_index]
                 lines = page_lines[page_index]
@@ -164,13 +424,26 @@ class PdfEngine(TranslationEngine):
                     result.skipped_units += 1
                     if progress:
                         fraction = completed_units / max(total_units, 1) if total_units else (page_index + 1) / max(total_pages, 1)
-                        progress(str(source), fraction, f"第 {page_index + 1}/{total_pages} 页无文字层，已保留原样")
+                        progress(
+                            str(source),
+                            fraction,
+                            tr(
+                                "progress.pdf_no_text",
+                                current=page_index + 1,
+                                total=total_pages,
+                            ),
+                        )
                     continue
                 if progress:
                     progress(
                         str(source),
                         completed_units / max(total_units, 1),
-                        f"正在翻译 PDF 第 {page_index + 1}/{total_pages} 页（本页 {len(lines)} 段）",
+                        tr(
+                            "progress.pdf_translating_page",
+                            current=page_index + 1,
+                            total=total_pages,
+                            segments=len(lines),
+                        ),
                     )
 
                 def batch_progress(done, pending_total):
@@ -181,31 +454,48 @@ class PdfEngine(TranslationEngine):
                     progress(
                         str(source),
                         units / max(total_units, 1),
-                        f"正在翻译 PDF 第 {page_index + 1}/{total_pages} 页 · 本页批次 {done}/{pending_total}",
+                        tr(
+                            "progress.pdf_translating_batch",
+                            current=page_index + 1,
+                            total=total_pages,
+                            done=done,
+                            total_batches=pending_total,
+                        ),
                     )
 
                 try:
                     translations = translator.translate_many([line["text"] for line in lines], progress=batch_progress)
                 except Exception as exc:
                     raise RuntimeError(
-                        f"PDF 第 {page_index + 1}/{total_pages} 页翻译失败（已完成 {completed_units}/{total_units} 段）：{exc}"
+                        tr(
+                            "error.pdf_page_failed",
+                            current=page_index + 1,
+                            total=total_pages,
+                            done=completed_units,
+                            segments=total_units,
+                            reason=exc,
+                        )
                     ) from exc
-                for line in lines:
-                    page.add_redact_annot(line["rect"], fill=False, cross_out=False)
-                page.apply_redactions(images=0, graphics=0, text=0)
-                for line, translated in zip(lines, translations):
-                    inserted, used_size = self._insert_fitted(page, line, translated, options.minimum_pdf_font_size)
-                    if not inserted:
-                        result.warnings.append(f"第 {page_index + 1} 页文字框空间不足：{line['text'][:60]}")
-                    elif used_size < options.minimum_pdf_font_size:
-                        result.warnings.append(f"第 {page_index + 1} 页译文字号缩小至 {used_size:.1f} pt：{line['text'][:60]}")
-                    result.translated_units += 1
+                self._apply_page_translations(
+                    page,
+                    page_index,
+                    lines,
+                    translations,
+                    options,
+                    result,
+                )
                 completed_units += len(lines)
                 if progress:
                     progress(
                         str(source),
                         completed_units / max(total_units, 1),
-                        f"已完成 PDF 第 {page_index + 1}/{total_pages} 页 · {completed_units}/{total_units} 段",
+                        tr(
+                            "progress.pdf_page_complete",
+                            current=page_index + 1,
+                            total=total_pages,
+                            done=completed_units,
+                            segments=total_units,
+                        ),
                     )
             destination.parent.mkdir(parents=True, exist_ok=True)
             document.subset_fonts()

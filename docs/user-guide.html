@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>文档智能翻译器使用说明 / Document Translator Guide</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --blue: #246bfd;
+      --blue-soft: #eef4ff;
+      --ink: #172033;
+      --muted: #647089;
+      --line: #dce3ee;
+      --paper: #ffffff;
+      --canvas: #f5f7fb;
+      --good: #137a4b;
+      --warn: #9a5b00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      font: 16px/1.7 "Segoe UI", "Microsoft YaHei UI", Arial, sans-serif;
+    }
+    .page {
+      width: min(980px, calc(100% - 32px));
+      margin: 28px auto;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 14px 42px rgba(25, 45, 82, .08);
+      overflow: hidden;
+    }
+    header {
+      padding: 42px 48px 34px;
+      background: linear-gradient(135deg, #f8fbff 0%, #eef4ff 100%);
+      border-bottom: 1px solid var(--line);
+    }
+    h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.25; }
+    h2 { margin: 46px 0 14px; font-size: 24px; }
+    h3 { margin: 28px 0 8px; font-size: 18px; }
+    p { margin: 8px 0 14px; }
+    a { color: var(--blue); }
+    nav { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 10px; }
+    nav a {
+      padding: 7px 12px;
+      border: 1px solid #cddafb;
+      border-radius: 999px;
+      background: #fff;
+      text-decoration: none;
+    }
+    main { padding: 4px 48px 48px; }
+    .meta { color: var(--muted); }
+    .badge {
+      display: inline-block;
+      margin-right: 8px;
+      padding: 3px 9px;
+      border-radius: 7px;
+      color: #164fb9;
+      background: #e7efff;
+      font-size: 13px;
+      font-weight: 650;
+    }
+    .card, .note, .warning {
+      margin: 16px 0;
+      padding: 16px 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fbfcfe;
+    }
+    .note { border-color: #bed0ff; background: var(--blue-soft); }
+    .warning { border-color: #ead2aa; background: #fffaf0; }
+    .steps { counter-reset: step; padding: 0; }
+    .steps li {
+      list-style: none;
+      position: relative;
+      margin: 14px 0;
+      padding-left: 42px;
+    }
+    .steps li::before {
+      counter-increment: step;
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 1px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      background: var(--blue);
+      font-size: 14px;
+      font-weight: 700;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0 20px; }
+    th, td { padding: 11px 12px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { background: #f2f5fa; }
+    code, pre {
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 14px;
+    }
+    code { padding: 2px 5px; border-radius: 4px; background: #eef1f6; }
+    pre {
+      overflow-x: auto;
+      padding: 16px;
+      border-radius: 10px;
+      color: #e9eef8;
+      background: #172033;
+      line-height: 1.55;
+    }
+    .ok { color: var(--good); font-weight: 650; }
+    .small { color: var(--muted); font-size: 14px; }
+    .en {
+      margin-top: 52px;
+      padding-top: 10px;
+      border-top: 3px solid var(--blue);
+    }
+    footer {
+      padding: 22px 48px;
+      color: var(--muted);
+      background: #f8fafc;
+      border-top: 1px solid var(--line);
+      font-size: 14px;
+    }
+    @media (max-width: 680px) {
+      .page { width: 100%; margin: 0; border: 0; border-radius: 0; }
+      header, main, footer { padding-left: 22px; padding-right: 22px; }
+      h1 { font-size: 27px; }
+      table { font-size: 14px; }
+    }
+  </style>
+</head>
+<body>
+<article class="page">
+  <header>
+    <span class="badge">v{{VERSION}}</span>
+    <span class="badge">{{EDITION}}</span>
+    <h1>文档智能翻译器</h1>
+    <p class="meta">保留版式的多格式文档批量翻译工具 · Document Translator</p>
+    <nav>
+      <a href="#quick-start">快速开始</a>
+      <a href="#editions">版本区别</a>
+      <a href="#pdf">PDF 引擎</a>
+      <a href="#engine-install">自行安装引擎</a>
+      <a href="#troubleshooting">常见问题</a>
+      <a href="#english">English</a>
+    </nav>
+  </header>
+
+  <main>
+    <section id="quick-start">
+      <h2>快速开始</h2>
+      <ol class="steps">
+        <li>双击 <code>DocumentTranslator.exe</code>。第一次启动后打开右上角“设置”。</li>
+        <li>填写 DeepSeek API Key，确认接口地址和模型，然后保存。API Key 不包含在软件包中。</li>
+        <li>将 PDF、Word、Excel 或 CSV 文件拖入窗口，也可以点击选择文件。</li>
+        <li>确认源语言、目标语言和输出目录，点击“开始翻译”。</li>
+        <li>任务完成后点击“打开”查看译文，或点击“打开文件夹”定位输出文件。</li>
+      </ol>
+      <div class="note">
+        <strong>推荐：</strong>PDF 模式保持“自动选择”。软件会根据页面内容选择智能排版或原位保版；
+        Word、Excel、CSV 不使用 BabelDOC 引擎。
+      </div>
+    </section>
+
+    <section id="editions">
+      <h2>应该下载哪个版本？</h2>
+      <table>
+        <thead><tr><th>版本</th><th>包含内容</th><th>适合用户</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Windows Setup Full</strong><br>安装完整版</td>
+            <td>主程序、智能 PDF 引擎、版面模型和字体；自动创建快捷方式和卸载入口。</td>
+            <td><span class="ok">大多数用户首选。</span>安装完成即可使用智能 PDF 排版。</td>
+          </tr>
+          <tr>
+            <td><strong>Portable Full</strong><br>免安装完整版</td>
+            <td>与安装版相同的翻译能力，不写入安装目录。</td>
+            <td>无安装权限、需要放在移动硬盘，或希望完全便携使用。</td>
+          </tr>
+          <tr>
+            <td><strong>Portable Lite</strong><br>免安装轻量版</td>
+            <td>不含 BabelDOC，本体更小；仍支持原位保版 PDF、Word、Excel 和 CSV。</td>
+            <td>主要翻译工程图纸、清单，或准备自己安装 BabelDOC 的用户。</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>免安装版必须先完整解压再运行。不要只复制 <code>DocumentTranslator.exe</code>。</p>
+    </section>
+
+    <section>
+      <h2>文件夹里的内容</h2>
+      <table>
+        <thead><tr><th>名称</th><th>用途</th></tr></thead>
+        <tbody>
+          <tr><td><code>DocumentTranslator.exe</code></td><td>主程序，双击它启动。</td></tr>
+          <tr><td><code>ApplicationFiles</code></td><td>主程序运行文件。<strong>请勿删除或改名。</strong></td></tr>
+          <tr><td><code>TranslationEngine</code></td><td>完整版的智能 PDF 引擎。<strong>请勿删除或单独移动。</strong></td></tr>
+          <tr><td><code>ReadMe.html</code> / <code>ReadMe.txt</code></td><td>本使用说明，可直接双击打开。</td></tr>
+          <tr><td><code>Legal</code></td><td>本软件和第三方组件的许可证及来源说明。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="pdf">
+      <h2>PDF 模式和输出</h2>
+      <h3>自动选择（推荐）</h3>
+      <p>正文较多的报告、手册和论文优先使用智能排版；图纸、铭牌和短标签 PDF 优先使用原位保版。完整版找不到智能引擎时会显示明确提示。</p>
+      <h3>智能排版</h3>
+      <p>使用 BabelDOC 分析段落、字体和页面结构，再将 DeepSeek 的译文放回页面。适合连续正文。</p>
+      <h3>原位保版</h3>
+      <p>尽量在原文字坐标处替换内容。适合工程图纸、表格、铭牌和版面位置不能变化的文件。</p>
+      <p>PDF 可以生成纯译文、双语对照，或同时生成两者。图片内部的文字默认不会 OCR 翻译。</p>
+    </section>
+
+    <section>
+      <h2>进度、速度和缓存</h2>
+      <ul>
+        <li>PDF 任务会依次显示版面分析、术语处理、正文翻译、重新排版和输出等阶段。</li>
+        <li>预计剩余时间根据近期处理速度计算，网络波动时可能调整。</li>
+        <li>相同文本和已成功结果会尽量复用，在不降低模型、术语和排版质量的前提下减少等待。</li>
+        <li>主翻译缓存超过 100 MB 后按时间自动清理；智能引擎的模型和字体不属于这 100 MB 缓存。</li>
+        <li>可选择 CSV、TSV、TXT 或 XLSX 术语表，软件会记住并继续使用。v1.3.0 尚不会自动建立永久术语库；译文缓存也不等于术语库。</li>
+      </ul>
+    </section>
+
+    <section id="engine-install">
+      <h2>轻量版自行安装 BabelDOC</h2>
+      <div class="warning">
+        只有需要“智能排版”PDF 时才需要执行本节。安装过程需要联网，首次下载模型和字体会占用较多磁盘空间。
+      </div>
+      <ol>
+        <li>安装 64 位 Python 3.12。</li>
+        <li>打开 PowerShell，逐行运行：</li>
+      </ol>
+      <pre>py -3.12 -m venv "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env"
+&amp; "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env\Scripts\python.exe" -m pip install --upgrade pip
+&amp; "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env\Scripts\python.exe" -m pip install BabelDOC==0.6.4
+&amp; "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env\Scripts\babeldoc.exe" --warmup</pre>
+      <ol start="3">
+        <li>在软件“设置 → 高级”中选择下面的引擎文件：</li>
+      </ol>
+      <pre>%LOCALAPPDATA%\DocumentTranslator\babeldoc-env\Scripts\babeldoc.exe</pre>
+      <p>如果电脑没有 <code>py -3.12</code> 命令，可将第一行开头改为 <code>python</code>。</p>
+    </section>
+
+    <section id="troubleshooting">
+      <h2>常见问题</h2>
+      <h3>双击后没有立即出现窗口</h3>
+      <p>安装版和 v1.3.0 文件夹式免安装版已减少启动解压。首次运行仍可能被 Windows Defender 扫描，请等待片刻；不要反复双击。</p>
+      <h3>提示没有智能 PDF 引擎</h3>
+      <p>完整版请确认 <code>TranslationEngine</code> 与主程序在同一目录。轻量版请按上一节安装，并在设置中选择 <code>babeldoc.exe</code>。</p>
+      <h3>进度一段时间没有变化</h3>
+      <p>查看任务阶段文字。版面模型首次载入、DeepSeek 网络响应或大页重新排版可能需要时间；只有软件明确报告停滞或失败时才需要重试。</p>
+      <h3>翻译文件在哪里？</h3>
+      <p>输出目录显示在主界面顶部。完成后可直接点击任务右侧的“打开”或“打开文件夹”。</p>
+      <h3>API Key 会随安装包公开吗？</h3>
+      <p>不会。公开安装包不包含任何 API Key、用户配置、翻译缓存、报告或源文档。请不要把自己的配置目录上传给他人。</p>
+    </section>
+
+    <section class="en" id="english">
+      <h2>English quick guide</h2>
+      <p><strong>Version:</strong> {{VERSION}} · <strong>Edition:</strong> {{EDITION}}</p>
+      <ol class="steps">
+        <li>Run <code>DocumentTranslator.exe</code>.</li>
+        <li>Open Settings, enter your own DeepSeek API key, verify the endpoint and model, and save.</li>
+        <li>Drag PDF, Word, Excel, or CSV files into the window.</li>
+        <li>Choose source language, target language, and output folder, then select Start Translation.</li>
+        <li>When complete, use Open File or Open Folder beside the task.</li>
+      </ol>
+      <h3>Editions</h3>
+      <ul>
+        <li><strong>Setup Full:</strong> recommended; installs the application and bundled BabelDOC smart-PDF engine.</li>
+        <li><strong>Portable Full:</strong> same translation capability without installation. Extract the entire archive first.</li>
+        <li><strong>Portable Lite:</strong> smaller and does not include BabelDOC. Strict-layout PDF, Word, Excel, and CSV remain available.</li>
+      </ul>
+      <h3>Do not separate runtime folders</h3>
+      <p><code>ApplicationFiles</code> is required by the application. The Full edition also requires <code>TranslationEngine</code>. Keep both beside the EXE.</p>
+      <h3>PDF modes</h3>
+      <p><strong>Automatic</strong> is recommended. Smart Layout is best for reports and manuals; Strict Layout is best for engineering drawings, labels, and fixed-position content. Image-only text is not OCR-translated by default.</p>
+      <h3>Glossaries and cache</h3>
+      <p>The selected CSV, TSV, TXT, or XLSX glossary is remembered and reused. v1.3.0 does not automatically build a permanent terminology library. Translation cache is capped at 100 MB and is not a terminology database.</p>
+      <h3>Install BabelDOC for the Lite edition</h3>
+      <p>Install 64-bit Python 3.12, run the four PowerShell commands in the Chinese section above, then select the resulting <code>babeldoc.exe</code> under Settings → Advanced.</p>
+      <h3>Privacy</h3>
+      <p>Release packages contain no API key, user configuration, translation cache, report, or source document. DeepSeek usage and charges are governed by the API account configured by the user.</p>
+    </section>
+  </main>
+
+  <footer>
+    <strong>Document Translator v{{VERSION}}</strong> · Windows 10/11 x64 ·
+    Source and updates: https://github.com/WANG40929/engineering-document-translator
+  </footer>
+</article>
+</body>
+</html>

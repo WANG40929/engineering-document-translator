@@ -26,6 +26,7 @@ def app_data_dir() -> Path:
 
 @dataclass
 class AppConfig:
+    ui_language: str = "auto"
     model: str = "deepseek-v4-flash"
     source_language: str = "auto"
     target_language: str = "zh"
@@ -39,7 +40,7 @@ class AppConfig:
     pdf_mode: str = "auto"
     pdf_output: str = "mono"
     babeldoc_path: str = ""
-    config_version: int = 3
+    config_version: int = 4
 
 
 class ConfigStore:
@@ -62,7 +63,9 @@ class ConfigStore:
                 allowed.setdefault("pdf_mode", "auto")
                 allowed.setdefault("pdf_output", "mono")
                 allowed.setdefault("babeldoc_path", "")
-            allowed["config_version"] = 3
+            if int(data.get("config_version", 0)) < 4:
+                allowed.setdefault("ui_language", "auto")
+            allowed["config_version"] = 4
             return AppConfig(**allowed)
         except Exception:
             return AppConfig()

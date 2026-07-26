@@ -4,6 +4,7 @@ import time
 
 from docx import Document
 
+from ..i18n import tr
 from ..models import FileResult
 from ..text_utils import is_translatable
 from .base import TranslationEngine
@@ -47,7 +48,11 @@ class DocxEngine(TranslationEngine):
 
             def report(done, total):
                 if progress:
-                    progress(str(source), done / max(total, 1), f"正在翻译 Word 文本 {done}/{total}")
+                    progress(
+                        str(source),
+                        done / max(total, 1),
+                        tr("progress.word", done=done, total=total),
+                    )
 
             translated = translator.translate_many(texts, report)
             for (runs, _source_text), value in zip(units, translated):

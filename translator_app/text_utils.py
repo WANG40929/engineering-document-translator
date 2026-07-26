@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .i18n import tr
+
 
 LETTER_RE = re.compile(r"[A-Za-z\u00c0-\u024f\u0400-\u04ff\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
 ONLY_CODE_RE = re.compile(r"^[\s\d\W_]+$", re.UNICODE)
@@ -90,7 +92,7 @@ def load_glossary(path: Path | None) -> dict[str, str]:
         return {}
     path = Path(path)
     if not path.exists():
-        raise FileNotFoundError(f"术语表不存在：{path}")
+        raise FileNotFoundError(tr("error.glossary_missing", path=path))
     result: dict[str, str] = {}
     if path.suffix.lower() in {".xlsx", ".xlsm"}:
         from openpyxl import load_workbook

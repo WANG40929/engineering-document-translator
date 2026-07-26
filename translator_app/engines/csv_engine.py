@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import time
 
+from ..i18n import tr
 from ..models import FileResult
 from ..text_utils import is_translatable
 from .base import TranslationEngine
@@ -43,7 +44,18 @@ class CsvEngine(TranslationEngine):
                     if is_translatable(value):
                         positions.append((row_index, column_index))
                         texts.append(value)
-            translations = translator.translate_many(texts, lambda d, t: progress(str(source), d / max(t, 1), f"正在翻译表格 {d}/{t}") if progress else None)
+            translations = translator.translate_many(
+                texts,
+                lambda done, total: (
+                    progress(
+                        str(source),
+                        done / max(total, 1),
+                        tr("progress.table", done=done, total=total),
+                    )
+                    if progress
+                    else None
+                ),
+            )
             for (row_index, column_index), value in zip(positions, translations):
                 rows[row_index][column_index] = value
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -59,4 +71,3 @@ class CsvEngine(TranslationEngine):
         result.elapsed_seconds = round(time.monotonic() - started, 2)
         result.usage = dict(getattr(translator, "usage", {}))
         return result
-

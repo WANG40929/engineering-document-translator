@@ -5,6 +5,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from ..i18n import tr
 from ..models import FileResult
 from .base import TranslationEngine
 from .docx_engine import DocxEngine
@@ -31,7 +32,8 @@ def _word_convert(source: Path, destination: Path, format_number: int) -> None:
         timeout=300,
     )
     if process.returncode or not destination.exists():
-        raise RuntimeError("需要安装 Microsoft Word 才能处理 .doc 文件。" + (process.stderr.strip() or process.stdout.strip()))
+        details = process.stderr.strip() or process.stdout.strip()
+        raise RuntimeError(tr("error.word_required") + (f" {details}" if details else ""))
 
 
 class DocEngine(TranslationEngine):
@@ -62,4 +64,3 @@ class DocEngine(TranslationEngine):
         result.elapsed_seconds = round(time.monotonic() - started, 2)
         result.usage = dict(getattr(translator, "usage", {}))
         return result
-

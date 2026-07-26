@@ -2,29 +2,51 @@ from __future__ import annotations
 
 import threading
 import os
-import re
 import time
+from collections import deque
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QIcon, QPainter, QPen, QPolygon
+from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QIcon, QPainter, QPen, QPixmap, QPolygon
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem,
+    QMenu, QMessageBox, QProgressBar, QPushButton, QSplashScreen, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from . import __version__
-from .cache import TranslationCache
-from .config import AppConfig, ConfigStore
-from .deepseek import DeepSeekTranslator
-from .models import LANGUAGES, TranslationOptions
-from .pipeline import SUPPORTED_EXTENSIONS, TranslationPipeline, collect_files, write_report
+from .config import ConfigStore
+from .file_types import SUPPORTED_EXTENSIONS, collect_files
+from .i18n import get_language, set_language, tr
+from .models import TranslationOptions
 from .secret_store import SecretStore
 from .settings_dialog import SettingsDialog
-from .text_utils import load_glossary
+
+
+DOCUMENT_LANGUAGE_KEYS = {
+    "auto": "language.auto_detect_short",
+    "zh": "language.chinese_simplified_short",
+    "en": "language.english",
+    "ru": "language.russian",
+    "de": "language.german",
+    "fr": "language.french",
+    "es": "language.spanish",
+    "pt": "language.portuguese",
+    "ja": "language.japanese",
+    "ko": "language.korean",
+}
+
+DOCUMENT_LANGUAGE_TOOLTIP_KEYS = {
+    **DOCUMENT_LANGUAGE_KEYS,
+    "auto": "language.auto_detect",
+    "zh": "language.chinese_simplified",
+}
+
+
+def _ui_font_family() -> str:
+    return "Microsoft YaHei UI" if get_language() == "zh-CN" else "Segoe UI"
 
 
 class Bridge(QObject):
@@ -143,6 +165,47 @@ class IconButton(QPushButton):
             p.drawLine(16, 8, 22, 8)
             p.drawLine(17, 16, 17, 25)
             p.drawLine(21, 16, 21, 25)
+        elif self.kind == "open":
+            p.drawRoundedRect(9, 10, 19, 20, 2, 2)
+            p.drawLine(18, 8, 30, 8)
+            p.drawLine(30, 8, 30, 20)
+            p.drawLine(30, 8, 17, 21)
+        elif self.kind == "folder":
+            p.drawRoundedRect(7, 12, 24, 17, 3, 3)
+            p.drawLine(8, 12, 15, 12)
+            p.drawLine(15, 12, 18, 9)
+            p.drawLine(18, 9, 25, 9)
+
+
+class OperationCell(QWidget):
+    """Actions for one task: open output, open its folder, or remove the row."""
+
+    def __init__(self, open_callback, folder_callback, remove_callback, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(0)
+        self.open_button = IconButton("open")
+        self.folder_button = IconButton("folder")
+        self.remove_button = IconButton("trash")
+        self.retranslate()
+        self.open_button.clicked.connect(open_callback)
+        self.folder_button.clicked.connect(folder_callback)
+        self.remove_button.clicked.connect(remove_callback)
+        self.open_button.setEnabled(False)
+        self.folder_button.setEnabled(False)
+        layout.addWidget(self.open_button)
+        layout.addWidget(self.folder_button)
+        layout.addWidget(self.remove_button)
+
+    def set_output_available(self, available: bool):
+        self.open_button.setEnabled(available)
+        self.folder_button.setEnabled(available)
+
+    def retranslate(self):
+        self.open_button.setToolTip(tr("common.open_file"))
+        self.folder_button.setToolTip(tr("common.open_folder"))
+        self.remove_button.setToolTip(tr("common.remove"))
 
 
 class SettingsButton(QPushButton):
@@ -152,8 +215,15 @@ class SettingsButton(QPushButton):
         super().__init__(parent)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("settingsButton")
-        self.setFixedSize(92, 38)
+        self.setFixedHeight(38)
         self.renderer = QSvgRenderer(str(Path(__file__).parent / "assets" / "settings.svg"))
+        self.retranslate()
+
+    def retranslate(self):
+        self.label = tr("main.settings")
+        width = max(92, min(230, self.fontMetrics().horizontalAdvance(self.label) + 52))
+        self.setFixedWidth(width)
+        self.update()
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -162,7 +232,14 @@ class SettingsButton(QPushButton):
         color = QColor("#1f67e8" if self.underMouse() else "#607087")
         self.renderer.render(p, QRectF(7, 5, 28, 28))
         p.setPen(color)
-        p.drawText(39, 0, self.width() - 42, self.height(), Qt.AlignVCenter | Qt.AlignLeft, "设置")
+        p.drawText(
+            39,
+            0,
+            self.width() - 42,
+            self.height(),
+            Qt.AlignVCenter | Qt.AlignLeft,
+            self.label,
+        )
 
 
 class FileDropTable(QTableWidget):
@@ -217,21 +294,27 @@ class DropZone(QFrame):
         title_row = QHBoxLayout()
         title_row.setContentsMargins(0, 0, 0, 0)
         title_row.setSpacing(8)
-        title = QLabel("拖拽文件到此处  或")
-        title.setObjectName("dropTitle")
-        choose = QPushButton("点击选择文件")
-        choose.setObjectName("chooseLink")
-        choose.setCursor(Qt.PointingHandCursor)
-        choose.clicked.connect(self.choose_requested.emit)
-        detail = QLabel("支持 PDF、Word、Excel、CSV 等文档")
-        detail.setObjectName("dropDetail")
-        title_row.addWidget(title)
-        title_row.addWidget(choose)
+        self.title = QLabel()
+        self.title.setObjectName("dropTitle")
+        self.choose = QPushButton()
+        self.choose.setObjectName("chooseLink")
+        self.choose.setCursor(Qt.PointingHandCursor)
+        self.choose.clicked.connect(self.choose_requested.emit)
+        self.detail = QLabel()
+        self.detail.setObjectName("dropDetail")
+        title_row.addWidget(self.title)
+        title_row.addWidget(self.choose)
         title_row.addStretch()
         text_box.addLayout(title_row)
-        text_box.addWidget(detail)
+        text_box.addWidget(self.detail)
         layout.addWidget(text_container, 0, Qt.AlignVCenter)
         layout.addStretch(1)
+        self.retranslate()
+
+    def retranslate(self):
+        self.title.setText(tr("main.drop_prompt"))
+        self.choose.setText(tr("main.choose_files"))
+        self.detail.setText(tr("main.supported_documents"))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -317,7 +400,7 @@ class TaskProgressCell(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 9, 12, 9)
         layout.setSpacing(7)
-        self.detail = QLabel("等待开始")
+        self.detail = QLabel(tr("status.waiting_start"))
         self.detail.setStyleSheet("font-size:11px; color:#667085;")
         meter = QHBoxLayout()
         meter.setSpacing(10)
@@ -341,16 +424,23 @@ class TaskProgressCell(QWidget):
         self.detail.setText(text or f"{fraction * 100:.1f}%")
         self.percent.setText(f"{fraction * 100:.0f}%")
 
+    def retranslate(self):
+        if self.bar.value() == 0:
+            self.detail.setText(tr("status.waiting_start"))
+
 
 class StatusCell(QWidget):
     COLORS = {
-        "待处理": "#98a2b3", "排队中": "#98a2b3",
-        "翻译中": "#1f67e8", "处理中": "#1f67e8",
-        "已完成": "#16865c", "失败": "#d14343",
+        "pending": "#98a2b3",
+        "queued": "#98a2b3",
+        "translating": "#1f67e8",
+        "processing": "#1f67e8",
+        "completed": "#16865c",
+        "failed": "#d14343",
+        "unsupported": "#d14343",
     }
-    DISPLAY = {"待处理": "等待中", "排队中": "等待中"}
 
-    def __init__(self, text="待处理", parent=None):
+    def __init__(self, text="pending", parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
         layout = QHBoxLayout(self)
@@ -365,25 +455,36 @@ class StatusCell(QWidget):
         self.set_status(text)
 
     def set_status(self, text):
+        self.status = text
         color = self.COLORS.get(text, "#98a2b3")
         self.dot.setStyleSheet(f"background:{color}; border-radius:4px;")
-        self.label.setText(self.DISPLAY.get(text, text))
+        self.label.setText(tr(f"status.{text}", text))
         self.label.setStyleSheet(f"color:{color}; font-weight:600;")
+
+    def retranslate(self):
+        self.set_status(self.status)
 
 class TranslatorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.config_store, self.secret_store = ConfigStore(), SecretStore()
+        self.saved = self.config_store.load()
+        set_language(self.saved.ui_language)
+        self.setFont(QFont(_ui_font_family()))
         self.setWindowFlags(Qt.Window | Qt.FramelessWindowHint)
-        self.setWindowTitle("文档智能翻译器")
+        self.setWindowTitle(tr("app.name"))
         icon_path = Path(__file__).parent / "assets" / "app_icon.png"
         if icon_path.exists():
             self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1080, 700)
-        self.setMinimumSize(900, 620)
-        self.config_store, self.secret_store = ConfigStore(), SecretStore()
-        self.saved = self.config_store.load()
+        # The fixed-height drop zone and two-row task area need 670 px to
+        # remain separated. A lower minimum caused the table to paint over the
+        # drop-zone border even though the window still appeared resizable.
+        self.setMinimumSize(900, 670)
         self.api_key = self.secret_store.load()
         self.save_key_enabled = bool(self.api_key)
+        self.outputs_by_input: dict[str, list[Path]] = {}
+        self.active_run_paths: list[str] = []
         self.bridge = Bridge()
         self.bridge.progress.connect(self._on_progress)
         self.bridge.done.connect(self._on_done)
@@ -391,10 +492,14 @@ class TranslatorWindow(QMainWindow):
         self.bridge.stopped.connect(self._on_stopped)
         self.running = False
         self.stop_requested = False
+        self._close_when_stopped = False
         self.task_started = 0.0
         self.progress_fraction = 0.0
         self.progress_message = ""
         self.progress_rate = 0.0
+        self.progress_samples = deque(maxlen=32)
+        self.eta_seconds = 0.0
+        self.last_progress_at = 0.0
         self.progress_sample_time = 0.0
         self.progress_sample_fraction = 0.0
         self.progress_timer = QTimer(self)
@@ -420,22 +525,22 @@ class TranslatorWindow(QMainWindow):
         icon_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         title_box = QVBoxLayout()
         title_box.setSpacing(4)
-        title = QLabel("文档智能翻译器")
-        title.setObjectName("title")
-        title.setAttribute(Qt.WA_TransparentForMouseEvents)
-        subtitle = QLabel("保留版式的多格式文档批量翻译工具")
-        subtitle.setObjectName("subtitle")
-        subtitle.setAttribute(Qt.WA_TransparentForMouseEvents)
-        title_box.addWidget(title)
-        title_box.addWidget(subtitle)
-        version = QLabel(f"v{__version__}")
-        version.setObjectName("versionBadge")
-        version.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.title_label = QLabel(tr("app.name"))
+        self.title_label.setObjectName("title")
+        self.title_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.subtitle_label = QLabel(tr("app.subtitle"))
+        self.subtitle_label.setObjectName("subtitle")
+        self.subtitle_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        title_box.addWidget(self.title_label)
+        title_box.addWidget(self.subtitle_label)
+        self.version_label = QLabel(f"v{__version__}")
+        self.version_label.setObjectName("versionBadge")
+        self.version_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.settings_button = SettingsButton()
         self.settings_button.clicked.connect(self._open_settings)
         heading.addWidget(icon_label)
         heading.addLayout(title_box)
-        heading.addWidget(version, 0, Qt.AlignVCenter)
+        heading.addWidget(self.version_label, 0, Qt.AlignVCenter)
         heading.addStretch()
 
         right_box = QVBoxLayout()
@@ -471,7 +576,7 @@ class TranslatorWindow(QMainWindow):
         summary.setObjectName("summaryPanel")
         summary.setFixedHeight(64)
         summary_layout = QHBoxLayout(summary)
-        summary_layout.setContentsMargins(58, 8, 58, 8)
+        summary_layout.setContentsMargins(36, 8, 36, 8)
         summary_layout.setSpacing(18)
         self.source_combo = self._language_combo(True, self.saved.source_language)
         self.target_combo = self._language_combo(False, self.saved.target_language)
@@ -493,14 +598,14 @@ class TranslatorWindow(QMainWindow):
         summary_layout.addWidget(self._separator())
         self.model_combo = QComboBox()
         self.model_combo.setEditable(True)
-        self.model_combo.addItem("DeepSeek V4 Flash", "deepseek-v4-flash")
-        self.model_combo.addItem("DeepSeek V4 Pro", "deepseek-v4-pro")
+        self.model_combo.addItem(tr("main.model_flash"), "deepseek-v4-flash")
+        self.model_combo.addItem(tr("main.model_pro"), "deepseek-v4-pro")
         saved_model_index = self.model_combo.findData(self.saved.model or "deepseek-v4-flash")
         if saved_model_index >= 0:
             self.model_combo.setCurrentIndex(saved_model_index)
         else:
             self.model_combo.setCurrentText(self.saved.model)
-        self.model_combo.setToolTip("Flash：推荐，速度快且成本低；Pro：复杂内容质量优先")
+        self.model_combo.setToolTip(tr("main.model_tooltip"))
         model_group = QWidget()
         model_box = QHBoxLayout(model_group)
         model_box.setContentsMargins(0, 0, 0, 0)
@@ -535,7 +640,16 @@ class TranslatorWindow(QMainWindow):
         body_layout.addWidget(self.drop_zone)
 
         self.table = FileDropTable(0, 6)
-        self.table.setHorizontalHeaderLabels(["文件任务（0）", "页数 / 大小", "状态", "进度", "操作", "路径"])
+        self.table.setHorizontalHeaderLabels(
+            [
+                tr("main.tasks_count", count=0),
+                tr("main.column_pages_size"),
+                tr("main.column_status"),
+                tr("main.column_progress"),
+                tr("main.column_actions"),
+                tr("main.column_path"),
+            ]
+        )
         self.table.horizontalHeaderItem(0).setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.table.hideColumn(5)
         self.table.files_dropped.connect(self._handle_dropped)
@@ -550,7 +664,7 @@ class TranslatorWindow(QMainWindow):
         header.setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.setColumnWidth(1, 145)
         self.table.setColumnWidth(2, 150)
-        self.table.setColumnWidth(4, 78)
+        self.table.setColumnWidth(4, 124)
         body_layout.addWidget(self.table)
         body_layout.addStretch(1)
         layout.addWidget(body, 1)
@@ -564,18 +678,19 @@ class TranslatorWindow(QMainWindow):
         self.progress = QProgressBar()
         self.progress.setRange(0, 1000)
         self.progress.setFormat("")
+        self.progress.setFixedWidth(150)
         self.progress.hide()
         footer_layout.addWidget(LineGlyph("clock", 26, "#637083"))
-        self.status = QLabel("就绪 · 可添加或拖入文档")
+        self.status = QLabel(tr("status.ready"))
         self.status.setObjectName("statusText")
         footer_layout.addWidget(self.status, 1)
-        self.stop_button = QPushButton("停止")
+        self.stop_button = QPushButton(tr("main.stop_translation"))
         self.stop_button.setObjectName("stopButton")
         self.stop_button.setFixedSize(144, 52)
         self.stop_button.clicked.connect(self._request_stop)
         self.stop_button.hide()
         footer_layout.addWidget(self.stop_button)
-        self.start_button = QPushButton("开始翻译")
+        self.start_button = QPushButton(tr("main.start_translation"))
         self.start_button.setObjectName("primary")
         self.start_button.setFixedSize(180, 52)
         self.start_button.clicked.connect(self._start)
@@ -585,7 +700,7 @@ class TranslatorWindow(QMainWindow):
         self.setStyleSheet("""
             #windowFrame { background: #ffffff; border: 1px solid #d8dee8; }
             #body, #titleBar { background: #ffffff; }
-            QWidget { font-family: 'Microsoft YaHei UI'; font-size: 13px; color: #182131; }
+            QWidget { font-size: 13px; color: #182131; }
             #title { font-size: 25px; font-weight: 700; color: #172033; }
             #subtitle { color: #687588; font-size: 13px; }
             #versionBadge { color: #536174; background: #f6f8fb; border: 1px solid #d7dee8; border-radius: 6px; padding: 3px 7px; }
@@ -679,8 +794,90 @@ class TranslatorWindow(QMainWindow):
             required = combo.fontMetrics().horizontalAdvance(text or " ") + 38
             combo.setFixedWidth(max(minimum, min(maximum, required)))
 
-        combo.currentTextChanged.connect(update_width)
+        if not getattr(combo, "_udt_width_handler_connected", False):
+            combo.currentTextChanged.connect(update_width)
+            combo._udt_width_handler_connected = True
         update_width(combo.currentText())
+
+    @staticmethod
+    def _populate_language_combo(combo, allow_auto, selected):
+        combo.blockSignals(True)
+        combo.clear()
+        for code, key in DOCUMENT_LANGUAGE_KEYS.items():
+            if allow_auto or code != "auto":
+                combo.addItem(tr(key), code)
+                combo.setItemData(
+                    combo.count() - 1,
+                    tr(DOCUMENT_LANGUAGE_TOOLTIP_KEYS[code]),
+                    Qt.ToolTipRole,
+                )
+        index = combo.findData(selected)
+        combo.setCurrentIndex(max(0, index))
+        combo.blockSignals(False)
+
+    def _retranslate_ui(self):
+        self.setFont(QFont(_ui_font_family()))
+        self.setWindowTitle(tr("app.name"))
+        self.title_label.setText(tr("app.name"))
+        self.subtitle_label.setText(tr("app.subtitle"))
+        self.settings_button.retranslate()
+        self.drop_zone.retranslate()
+
+        source = self.source_combo.currentData()
+        target = self.target_combo.currentData()
+        self._populate_language_combo(self.source_combo, True, source)
+        self._populate_language_combo(self.target_combo, False, target)
+
+        model_data = self.model_combo.currentData()
+        custom_model = self.model_combo.currentText()
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        self.model_combo.addItem(tr("main.model_flash"), "deepseek-v4-flash")
+        self.model_combo.addItem(tr("main.model_pro"), "deepseek-v4-pro")
+        model_index = self.model_combo.findData(model_data)
+        if model_index >= 0:
+            self.model_combo.setCurrentIndex(model_index)
+        else:
+            self.model_combo.setCurrentText(custom_model)
+        self.model_combo.blockSignals(False)
+        self.model_combo.setToolTip(tr("main.model_tooltip"))
+
+        headers = (
+            tr("main.tasks_count", count=self.table.rowCount()),
+            tr("main.column_pages_size"),
+            tr("main.column_status"),
+            tr("main.column_progress"),
+            tr("main.column_actions"),
+            tr("main.column_path"),
+        )
+        for column, text in enumerate(headers):
+            item = self.table.horizontalHeaderItem(column)
+            if item:
+                item.setText(text)
+
+        for row in range(self.table.rowCount()):
+            status_cell = self.table.cellWidget(row, 2)
+            if isinstance(status_cell, StatusCell):
+                status_cell.retranslate()
+            progress_cell = self.table.cellWidget(row, 3)
+            if isinstance(progress_cell, TaskProgressCell):
+                progress_cell.retranslate()
+            operation_cell = self.table.cellWidget(row, 4)
+            if isinstance(operation_cell, OperationCell):
+                operation_cell.retranslate()
+
+        self.stop_button.setText(tr("main.stop_translation"))
+        self.start_button.setText(tr("main.start_translation"))
+        self.start_button.setFixedWidth(
+            max(180, min(240, self.start_button.fontMetrics().horizontalAdvance(self.start_button.text()) + 42))
+        )
+        self.stop_button.setFixedWidth(
+            max(144, min(210, self.stop_button.fontMetrics().horizontalAdvance(self.stop_button.text()) + 42))
+        )
+        self._update_output_button()
+        self._fit_combo_to_text(self.source_combo, 86, 170)
+        self._fit_combo_to_text(self.target_combo, 94, 170)
+        self._fit_combo_to_text(self.model_combo, 164, 270)
 
     def _toggle_maximize(self):
         if self.isMaximized():
@@ -713,18 +910,19 @@ class TranslatorWindow(QMainWindow):
     def _update_output_button(self):
         value = self.output_edit.text().strip()
         if not value:
-            label = "原文件所在目录"
+            label = tr("main.output_original_directory")
         else:
             path = Path(value)
             label = path.name or str(path)
-        self.output_button.setText(f"输出到：{label}")
-        self.output_button.setToolTip(value or "翻译结果保存在原文件所在目录")
+        self.output_button.setText(tr("main.output_to", location=label))
+        self.output_button.setToolTip(value or tr("main.output_original_tooltip"))
 
     def _open_settings(self):
         dialog = SettingsDialog(self.saved, self.api_key, self.save_key_enabled, self)
         if not dialog.exec():
             return
         values = dialog.values()
+        self.saved.ui_language = values["ui_language"]
         self.api_key = values["api_key"]
         self.save_key_enabled = values["save_key"]
         self.saved.glossary_path = values["glossary_path"]
@@ -745,7 +943,9 @@ class TranslatorWindow(QMainWindow):
             self.secret_store.save(self.api_key)
         else:
             self.secret_store.clear()
-        self.status.setText("设置已保存")
+        set_language(self.saved.ui_language)
+        self._retranslate_ui()
+        self.status.setText(tr("status.settings_saved"))
 
     def center_on_active_screen(self):
         """Place the window in the center of the monitor currently in use."""
@@ -763,11 +963,26 @@ class TranslatorWindow(QMainWindow):
             self._initial_center_done = True
             QTimer.singleShot(30, self.center_on_active_screen)
 
+    def closeEvent(self, event):
+        """Let the worker clean up an active BabelDOC child before exiting."""
+        if self.running:
+            self._close_when_stopped = True
+            self._request_stop()
+            event.ignore()
+            return
+        super().closeEvent(event)
+
+    def _close_after_worker_cleanup(self) -> bool:
+        if not self._close_when_stopped:
+            return False
+        self._close_when_stopped = False
+        QTimer.singleShot(0, self.close)
+        return True
+
     def _language_combo(self, allow_auto, selected):
         combo = QComboBox()
-        for code, label in LANGUAGES.items():
-            if allow_auto or code != "auto": combo.addItem(label, code)
-        index = combo.findData(selected); combo.setCurrentIndex(max(0, index)); return combo
+        self._populate_language_combo(combo, allow_auto, selected)
+        return combo
 
     @staticmethod
     def _human_size(value):
@@ -778,8 +993,8 @@ class TranslatorWindow(QMainWindow):
     def _paths(self, pending_only=False):
         paths = []
         for row in range(self.table.rowCount()):
-            status = self.table.item(row, 2).data(Qt.UserRole) or "待处理"
-            if pending_only and status in {"已完成", "处理中", "排队中"}:
+            status = self.table.item(row, 2).data(Qt.UserRole) or "pending"
+            if pending_only and status in {"completed", "processing", "translating", "queued"}:
                 continue
             paths.append(Path(self.table.item(row, 5).text()))
         return paths
@@ -798,14 +1013,16 @@ class TranslatorWindow(QMainWindow):
             self.table.setCellWidget(row, 0, FileNameCell(path))
             self.table.setItem(row, 1, QTableWidgetItem(self._human_size(path.stat().st_size)))
             status_item = QTableWidgetItem("")
-            status_item.setData(Qt.UserRole, "待处理")
+            status_item.setData(Qt.UserRole, "pending")
             self.table.setItem(row, 2, status_item)
-            self.table.setCellWidget(row, 2, StatusCell("待处理"))
+            self.table.setCellWidget(row, 2, StatusCell("pending"))
             self.table.setCellWidget(row, 3, TaskProgressCell())
-            remove = IconButton("trash")
-            remove.setToolTip("移除")
-            remove.clicked.connect(lambda _checked=False, value=str(path): self._remove_path(value))
-            self.table.setCellWidget(row, 4, remove)
+            actions = OperationCell(
+                lambda _checked=False, value=str(path): self._open_outputs(value),
+                lambda _checked=False, value=str(path): self._open_output_folder(value),
+                lambda _checked=False, value=str(path): self._remove_path(value),
+            )
+            self.table.setCellWidget(row, 4, actions)
             self.table.setItem(row, 5, QTableWidgetItem(str(path)))
             existing.add(str(path))
         self._update_file_count()
@@ -814,17 +1031,60 @@ class TranslatorWindow(QMainWindow):
         count = self.table.rowCount()
         header_item = self.table.horizontalHeaderItem(0)
         if header_item:
-            header_item.setText(f"文件任务（{count}）")
+            header_item.setText(tr("main.tasks_count", count=count))
         visible_rows = min(max(count, 2), 4)
         self.table.setFixedHeight(68 + visible_rows * 84)
         self.start_button.setEnabled(not self.running and self.table.rowCount() > 0)
 
     def _remove_path(self, value):
         target = str(Path(value).resolve())
+        self.outputs_by_input.pop(target, None)
         for row in range(self.table.rowCount() - 1, -1, -1):
             if str(Path(self.table.item(row, 5).text()).resolve()) == target:
                 self.table.removeRow(row)
         self._update_file_count()
+
+    def _existing_outputs(self, input_path: str) -> list[Path]:
+        key = str(Path(input_path).resolve())
+        return [path for path in self.outputs_by_input.get(key, []) if path.is_file()]
+
+    def _open_outputs(self, input_path: str):
+        outputs = self._existing_outputs(input_path)
+        if not outputs:
+            QMessageBox.warning(
+                self,
+                tr("dialog.output_missing_title"),
+                tr("dialog.output_missing_message"),
+            )
+            return
+        if len(outputs) == 1:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(outputs[0])))
+            return
+        menu = QMenu(self)
+        for output in outputs:
+            action = menu.addAction(output.name)
+            action.triggered.connect(
+                lambda _checked=False, path=output: QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+            )
+        menu.exec(QCursor.pos())
+
+    def _open_output_folder(self, input_path: str):
+        outputs = self._existing_outputs(input_path)
+        if not outputs:
+            QMessageBox.warning(
+                self,
+                tr("dialog.output_missing_title"),
+                tr("dialog.output_missing_message"),
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(outputs[0].parent)))
+
+    def _set_row_outputs(self, row: int, input_path: str, outputs: list[str]):
+        existing = [Path(value).resolve() for value in outputs if value and Path(value).is_file()]
+        self.outputs_by_input[str(Path(input_path).resolve())] = existing
+        cell = self.table.cellWidget(row, 4)
+        if isinstance(cell, OperationCell):
+            cell.set_output_available(bool(existing))
 
     def _set_row_progress(self, row, fraction, text=""):
         cell = self.table.cellWidget(row, 3)
@@ -852,16 +1112,25 @@ class TranslatorWindow(QMainWindow):
         before = self.table.rowCount()
         self._insert_paths(files)
         added = self.table.rowCount() - before
-        self.status.setText(f"拖入成功：新增 {added} 个文件")
+        self.status.setText(tr("status.files_dropped", count=added))
 
     def _add_files(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, "选择文档", "", "支持的文档 (*.pdf *.docx *.doc *.xlsx *.xlsm *.csv *.tsv);;所有文件 (*.*)")
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            tr("dialog.select_documents"),
+            "",
+            f'{tr("dialog.filter_documents")};;{tr("common.all_files")} (*.*)',
+        )
         self._insert_paths(paths)
+        if paths:
+            self.status.setText(tr("status.files_added", count=len(paths)))
 
     def _add_folder(self):
-        folder = QFileDialog.getExistingDirectory(self, "选择文件夹")
+        folder = QFileDialog.getExistingDirectory(self, tr("dialog.select_folder"))
         if folder:
-            paths = collect_files(Path(folder)); self._insert_paths(paths); self.status.setText(f"已找到 {len(paths)} 个支持的文件")
+            paths = collect_files(Path(folder))
+            self._insert_paths(paths)
+            self.status.setText(tr("status.files_found", count=len(paths)))
 
     def _remove(self):
         for row in sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True):
@@ -871,17 +1140,17 @@ class TranslatorWindow(QMainWindow):
     def _retry_selected(self):
         rows = {index.row() for index in self.table.selectedIndexes()}
         for row in rows:
-            self._set_row_status(row, "待处理")
-            self._set_row_progress(row, 0, "等待")
+            self._set_row_status(row, "pending")
+            self._set_row_progress(row, 0, tr("status.waiting"))
         if rows:
-            self.status.setText(f"已将 {len(rows)} 个文件重新设为待处理")
+            self.status.setText(tr("status.rows_requeued", count=len(rows)))
 
     def _clear(self):
         self.table.setRowCount(0)
         self._update_file_count()
 
     def _choose_output(self):
-        path = QFileDialog.getExistingDirectory(self, "选择输出目录")
+        path = QFileDialog.getExistingDirectory(self, tr("dialog.select_output_folder"))
         if path:
             self.output_edit.setText(path)
             self._update_output_button()
@@ -889,12 +1158,24 @@ class TranslatorWindow(QMainWindow):
     def _start(self):
         if self.running: return
         paths = self._paths(pending_only=True)
-        if not paths: QMessageBox.information(self, "没有待处理文件", "列表中的文件都已完成，请添加新文件或把失败文件重新排队。"); return
+        if not paths:
+            QMessageBox.information(
+                self,
+                tr("dialog.no_pending_title"),
+                tr("dialog.no_pending_message"),
+            )
+            return
         key = self.api_key.strip()
         if not key:
             self._open_settings()
             key = self.api_key.strip()
-        if not key: QMessageBox.warning(self, "缺少 API Key", "请在设置中输入 DeepSeek API Key。"); return
+        if not key:
+            QMessageBox.warning(
+                self,
+                tr("dialog.missing_api_title"),
+                tr("dialog.missing_api_message"),
+            )
+            return
         output = Path(self.output_edit.text()) if self.output_edit.text().strip() else None
         glossary = Path(self.saved.glossary_path) if self.saved.glossary_path.strip() else None
         source, target = self.source_combo.currentData(), self.target_combo.currentData()
@@ -918,28 +1199,41 @@ class TranslatorWindow(QMainWindow):
             babeldoc_path=Path(self.saved.babeldoc_path) if self.saved.babeldoc_path else None,
         )
         pending = {str(path.resolve()) for path in paths}
+        self.active_run_paths = [str(path.resolve()) for path in paths]
         for row in range(self.table.rowCount()):
             if str(Path(self.table.item(row, 5).text()).resolve()) in pending:
-                self._set_row_status(row, "排队中")
-                self._set_row_progress(row, 0, "等待")
+                self._set_row_status(row, "queued")
+                self._set_row_progress(row, 0, tr("status.waiting"))
         self.stop_requested = False
         self.running = True; self.start_button.setEnabled(False); self.progress.setValue(0)
+        self.progress.show()
         self.settings_button.setEnabled(False)
-        self.stop_button.setText("停止")
+        self.stop_button.setText(tr("main.stop_translation"))
         self.stop_button.setEnabled(True)
         self.stop_button.show()
         self.task_started = time.monotonic()
         self.progress_fraction = 0.0
-        self.progress_message = "正在分析文档"
+        self.progress_message = tr("progress.analyzing_document")
         self.progress_rate = 0.0
         self.progress_sample_time = self.task_started
         self.progress_sample_fraction = 0.0
+        self.progress_samples.clear()
+        self.progress_samples.append((self.task_started, 0.0))
+        self.eta_seconds = 0.0
+        self.last_progress_at = self.task_started
         self.progress_timer.start()
         self._refresh_progress_text()
         threading.Thread(target=self._worker, args=(paths, key, options), daemon=True).start()
 
     def _worker(self, paths, key, options):
         try:
+            # Heavy document libraries are deliberately imported only after the
+            # user starts a task. This keeps normal application startup fast.
+            from .cache import TranslationCache
+            from .deepseek import DeepSeekTranslator
+            from .pipeline import TranslationPipeline, write_report
+            from .text_utils import load_glossary
+
             translator = DeepSeekTranslator(
                 key, options.model, options.source_language, options.target_language,
                 load_glossary(options.glossary_path), TranslationCache(), options.request_timeout, options.batch_size,
@@ -966,8 +1260,8 @@ class TranslatorWindow(QMainWindow):
             return
         self.stop_requested = True
         self.stop_button.setEnabled(False)
-        self.stop_button.setText("正在停止…")
-        self.status.setText("正在停止 · 当前接口请求结束后停止任务")
+        self.stop_button.setText(tr("common.stopping"))
+        self.status.setText(tr("status.stopping"))
 
     @staticmethod
     def _duration_text(seconds):
@@ -975,10 +1269,10 @@ class TranslatorWindow(QMainWindow):
         minutes, seconds = divmod(seconds, 60)
         hours, minutes = divmod(minutes, 60)
         if hours:
-            return f"{hours}小时{minutes:02d}分"
+            return tr("progress.hours_minutes", hours=hours, minutes=minutes)
         if minutes:
-            return f"{minutes}分{seconds:02d}秒"
-        return f"{seconds}秒"
+            return tr("progress.minutes_seconds", minutes=minutes, seconds=seconds)
+        return tr("progress.seconds", seconds=seconds)
 
     def _on_progress(self, file_path, fraction, message):
         now = time.monotonic()
@@ -990,6 +1284,8 @@ class TranslatorWindow(QMainWindow):
             self.progress_rate = rate if self.progress_rate <= 0 else self.progress_rate * 0.72 + rate * 0.28
             self.progress_sample_time = now
             self.progress_sample_fraction = fraction
+            self.progress_samples.append((now, fraction))
+            self.last_progress_at = now
         self.progress_fraction = fraction
         self.progress_message = message
         self.progress.setValue(round(fraction * 1000))
@@ -998,19 +1294,14 @@ class TranslatorWindow(QMainWindow):
             for row in range(self.table.rowCount()):
                 if str(Path(self.table.item(row, 5).text()).resolve()) != target:
                     continue
-                self._set_row_status(row, "翻译中")
-                segment = re.search(r"(\d+)\s*/\s*(\d+)\s*段", message)
-                page = re.search(r"第\s*(\d+)\s*/\s*(\d+)\s*页", message)
-                if segment and int(segment.group(2)):
-                    local = int(segment.group(1)) / int(segment.group(2))
-                elif page and int(page.group(2)):
-                    local = int(page.group(1)) / int(page.group(2))
-                else:
-                    local = fraction if len(self._paths()) == 1 else 0.0
-                detail = message
-                if "第" in detail:
-                    detail = detail[detail.find("第"):]
-                self._set_row_progress(row, local, detail)
+                self._set_row_status(row, "translating")
+                try:
+                    run_index = self.active_run_paths.index(target)
+                    local = fraction * max(len(self.active_run_paths), 1) - run_index
+                    local = min(1.0, max(0.0, local))
+                except ValueError:
+                    local = fraction if len(self.active_run_paths) == 1 else 0.0
+                self._set_row_progress(row, local, message)
                 self.table.cellWidget(row, 3).setToolTip(message)
                 break
         self._refresh_progress_text()
@@ -1019,14 +1310,35 @@ class TranslatorWindow(QMainWindow):
         if not self.running or not self.task_started:
             return
         elapsed = time.monotonic() - self.task_started
-        if self.progress_rate > 0 and self.progress_fraction < 1:
+        if (
+            self.progress_rate > 0
+            and self.progress_fraction >= 0.02
+            and self.progress_fraction < 1
+            and elapsed >= 5
+            and len(self.progress_samples) >= 3
+        ):
             remaining = (1.0 - self.progress_fraction) / self.progress_rate
-            eta = f"预计剩余约 {self._duration_text(remaining)}"
+            if self.eta_seconds <= 0:
+                self.eta_seconds = remaining
+            else:
+                lower = self.eta_seconds * 0.65
+                upper = self.eta_seconds * 1.35
+                bounded = min(upper, max(lower, remaining))
+                self.eta_seconds = self.eta_seconds * 0.78 + bounded * 0.22
+            eta = tr("progress.eta", duration=self._duration_text(self.eta_seconds))
         else:
-            eta = "预计剩余时间计算中"
+            eta = tr("progress.eta_calculating")
+        if self.last_progress_at and time.monotonic() - self.last_progress_at >= 12:
+            eta = f"{eta} · {tr('progress.stalled')}"
         percent = round(self.progress_fraction * 100, 1)
         self.status.setText(
-            f"{self.progress_message} · {percent}% · 已用时 {self._duration_text(elapsed)} · {eta}"
+            tr(
+                "progress.summary",
+                stage=self.progress_message,
+                percent=percent,
+                elapsed=self._duration_text(elapsed),
+                eta=eta,
+            )
         )
 
     def _on_done(self, results, report):
@@ -1034,51 +1346,125 @@ class TranslatorWindow(QMainWindow):
         self.running = False; self.start_button.setEnabled(True); self.settings_button.setEnabled(True)
         self.stop_requested = False
         self.stop_button.hide()
+        self.progress.hide()
         result_by_path = {str(Path(result.input_path).resolve()): result for result in results}
         for row in range(self.table.rowCount()):
             path = str(Path(self.table.item(row, 5).text()).resolve())
             result = result_by_path.get(path)
             if result:
-                label = "已完成" if result.status == "completed" else "失败"
+                label = "completed" if result.status == "completed" else "failed"
                 self._set_row_status(row, label)
                 if result.status == "completed":
                     self._set_row_progress(row, 1.0, "100%")
+                    self._set_row_outputs(
+                        row,
+                        result.input_path,
+                        [result.output_path, *result.additional_outputs],
+                    )
         completed = sum(r.status == "completed" for r in results); failed = sum(r.status == "failed" for r in results)
         if not failed:
             self.progress_fraction = 1.0
             self.progress.setValue(1000)
-        self.status.setText(f"完成：成功 {completed}，失败 {failed}。报告：{report}")
-        QMessageBox.information(self, "翻译完成", f"成功：{completed}\n失败：{failed}\n\n报告：{report}")
+        self.status.setText(
+            tr("status.batch_complete", completed=completed, failed=failed, report=report)
+        )
+        if self._close_after_worker_cleanup():
+            return
+        QMessageBox.information(
+            self,
+            tr("dialog.translation_complete_title"),
+            tr(
+                "dialog.translation_complete_message",
+                completed=completed,
+                failed=failed,
+                report=report,
+            ),
+        )
 
     def _on_error(self, message):
         self.progress_timer.stop()
         self.running = False; self.start_button.setEnabled(True); self.settings_button.setEnabled(True)
         self.stop_requested = False
         self.stop_button.hide()
+        self.progress.hide()
         for row in range(self.table.rowCount()):
             status = self.table.item(row, 2).data(Qt.UserRole)
-            if status in {"排队中", "处理中", "翻译中"}:
-                self._set_row_status(row, "失败")
-        self.status.setText("任务失败"); QMessageBox.critical(self, "错误", message)
+            if status in {"queued", "processing", "translating"}:
+                self._set_row_status(row, "failed")
+        self.status.setText(tr("status.task_failed"))
+        if self._close_after_worker_cleanup():
+            return
+        QMessageBox.critical(self, tr("dialog.error_title"), message)
 
     def _on_stopped(self):
         self.progress_timer.stop()
         self.running = False
         self.stop_requested = False
         self.stop_button.hide()
+        self.progress.hide()
         self.settings_button.setEnabled(True)
         for row in range(self.table.rowCount()):
             status = self.table.item(row, 2).data(Qt.UserRole)
-            if status in {"排队中", "处理中", "翻译中", "失败"}:
-                self._set_row_status(row, "待处理")
+            if status in {"queued", "processing", "translating", "failed"}:
+                self._set_row_status(row, "pending")
         self._update_file_count()
-        self.status.setText("任务已停止 · 未完成文件可重新开始")
+        self.status.setText(tr("status.stopped"))
+        self._close_after_worker_cleanup()
+
+
+def _create_splash() -> QSplashScreen:
+    """Create a cheap, immediately visible splash without delaying startup."""
+    pixmap = QPixmap(430, 220)
+    pixmap.fill(QColor("#ffffff"))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(QPen(QColor("#dce4f1"), 1))
+    painter.drawRoundedRect(0, 0, 429, 219, 14, 14)
+    painter.setBrush(QColor("#edf4ff"))
+    painter.setPen(Qt.NoPen)
+    painter.drawRoundedRect(28, 48, 72, 72, 16, 16)
+    icon_path = Path(__file__).parent / "assets" / "app_icon.png"
+    if icon_path.exists():
+        icon = QPixmap(str(icon_path)).scaled(56, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        painter.drawPixmap(36, 56, icon)
+    painter.setPen(QColor("#172033"))
+    title_font = QFont(_ui_font_family(), 17)
+    title_font.setBold(True)
+    painter.setFont(title_font)
+    painter.drawText(126, 58, 275, 38, Qt.AlignLeft | Qt.AlignVCenter, tr("app.name"))
+    painter.setPen(QColor("#657287"))
+    painter.setFont(QFont(_ui_font_family(), 9))
+    painter.drawText(
+        QRectF(126, 96, 275, 48),
+        Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
+        tr("app.subtitle"),
+    )
+    painter.setPen(QColor("#1f67e8"))
+    painter.drawText(
+        28,
+        164,
+        374,
+        24,
+        Qt.AlignLeft | Qt.AlignVCenter,
+        f"{tr('app.starting')}   v{__version__}",
+    )
+    painter.end()
+    return QSplashScreen(pixmap, Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
 
 
 def main():
     app = QApplication.instance() or QApplication([])
-    window = TranslatorWindow(); window.show()
+    set_language(ConfigStore().load().ui_language)
+    splash = None
+    if os.environ.get("UDT_NO_SPLASH") != "1":
+        splash = _create_splash()
+        splash.show()
+        app.processEvents()
+    window = TranslatorWindow()
+    window.show()
     QTimer.singleShot(0, window.center_on_active_screen)
+    if splash is not None:
+        splash.finish(window)
     if os.environ.get("UDT_SMOKE_TEST") == "1":
         QTimer.singleShot(800, app.quit)
     return app.exec()

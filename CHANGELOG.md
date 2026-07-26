@@ -4,6 +4,38 @@
 
 This project follows semantic versioning. Stable builds are available from [GitHub Releases](https://github.com/WANG40929/engineering-document-translator/releases).
 
+## 1.3.0
+
+### 中文
+
+- 界面新增简体中文、英语、俄语、西班牙语、法语和德语，可跟随 Windows 或在设置中手动切换。
+- Windows 发布版调整为安装完整版、免安装完整版和免安装轻量版；安装完整版默认内置 BabelDOC。
+- 发布包和内部文件使用 ASCII 安全名称，并附带可直接阅读的 `ReadMe.html` 与 `ReadMe.txt`。
+- 改为文件夹式程序结构并延迟加载翻译组件，配合轻量启动画面，明显缩短双击后的等待时间。
+- PDF 进度现在显示解析、版面分析、术语、翻译、排版、字体和保存等真实阶段，并提供动态预计剩余时间。
+- 已完成任务新增“打开文件”和“打开文件夹”操作。
+- 在不降低模型、术语检查或排版质量的前提下并行处理独立翻译批次；加入自适应限速、失败退让和逐批缓存检查点。
+- 截断或损坏的大批次 JSON 会自动拆小重试；重复 PDF 会完整复用纯译文和双语输出。
+- 增加 Excel 内嵌图片保护；完整版优先使用随软件验证过的内置 PDF 引擎。
+- 运行中关闭窗口会先停止任务并清理后台引擎；修复最小窗口下的控件重叠和多语言截字。
+- 保持 100 MB 译文缓存上限不变，超限后仍按时间清理最旧记录。
+- 修正多语言输出文件识别，避免已翻译文件被再次加入任务。
+
+### English
+
+- Added Simplified Chinese, English, Russian, Spanish, French, and German interfaces with automatic Windows-language detection and a manual setting.
+- Added Windows Setup Full, Portable Full, and Portable Lite editions; Setup Full includes BabelDOC by default.
+- Switched release and internal filenames to ASCII-safe names and included readable `ReadMe.html` and `ReadMe.txt` files.
+- Reduced launch delay with a folder-based build, lazy loading of translation components, and a lightweight splash screen.
+- Added real PDF stage progress for parsing, layout analysis, terminology, translation, typesetting, fonts, and saving, together with a dynamic ETA.
+- Added **Open file** and **Open folder** actions for completed tasks.
+- Improved throughput without lowering model, terminology-review, or layout quality by using concurrent independent batches, adaptive rate limiting, retry backoff, and per-batch cache checkpoints.
+- Added automatic split recovery for truncated or malformed batch JSON and complete reuse of translated-only plus bilingual outputs for duplicate PDFs.
+- Preserved embedded Excel images and made Full editions prefer their tested bundled PDF engine over stale system copies.
+- Closing during a task now waits for background-engine cleanup; minimum-window overlap and multilingual clipping were fixed.
+- Kept the translation cache limit at 100 MB with age-based cleanup of the oldest entries.
+- Improved recognition of translated filenames in all supported languages to prevent accidental reprocessing.
+
 ## 1.2.0
 
 ### 中文
