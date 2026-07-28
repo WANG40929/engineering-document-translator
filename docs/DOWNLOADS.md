@@ -2,16 +2,33 @@
 
 ## 中文
 
-GitHub Releases 提供两个 Windows 压缩包，主程序功能和版本号完全相同：
+v1.3.0 提供三种 Windows 交付方式。三者使用相同的主程序和翻译质量设置。
 
-| 版本 | 包含内容 | 适合谁 | 下载后怎么用 |
+| 版本 | 包含内容 | 推荐用途 | 使用方式 |
 |---|---|---|---|
-| 完整版 `Full-with-BabelDOC` | 主程序、BabelDOC 智能排版引擎、布局模型和字体 | 需要翻译报告、说明书、论文等连续正文 PDF 的用户 | 解压完整文件夹，运行 `DocumentTranslator.exe`；不要只把 EXE 单独移走 |
-| 轻量版 `Lite-no-BabelDOC` | 主程序，不含 BabelDOC | 主要翻译 Word、Excel、CSV、工程图纸和短标签 PDF，或希望自己安装引擎的用户 | 解压后直接运行 `DocumentTranslator.exe` |
+| **Windows Setup Full** | 主程序、BabelDOC 智能 PDF 引擎、布局模型和字体 | 推荐大多数用户，特别是报告、说明书和连续正文 PDF | 运行安装程序，按向导完成安装 |
+| **Portable Full** | 与安装完整版相同，但不写入系统安装目录 | 需要完整功能但不希望安装 | 解压完整文件夹，运行 `DocumentTranslator.exe` |
+| **Portable Lite** | 主程序，不含 BabelDOC | Word、Excel、CSV、图纸、短标签 PDF，或自行管理 BabelDOC 的用户 | 解压完整文件夹，运行 `DocumentTranslator.exe` |
 
-轻量版仍然可以翻译 PDF，但使用“原位保版”引擎。选择“自动”时，如果没有找到 BabelDOC，软件会安全回退到原位保版。完整版约 1 GB（解压后），体积主要来自本地布局模型和多语言字体；它们不是 DeepSeek 模型，也不会消耗 DeepSeek Token。
+Setup Full 的安装向导提供简体中文、英语、俄语、西班牙语、法语和德语，并在每次启动时按 Windows 界面语言自动选择。
 
-### 轻量版自行安装 BabelDOC
+### 选择建议
+
+- 不确定选哪个：选择 **Windows Setup Full**。它默认内置智能 PDF 引擎。
+- 不能或不想安装软件：选择 **Portable Full**。
+- 更在意下载体积，且主要处理 Word、Excel、CSV 或工程图纸：选择 **Portable Lite**。
+
+Lite 版仍可使用“原位保版”方式翻译 PDF。自动模式找不到 BabelDOC 时会安全回退，不影响 Word、Excel、CSV 等其他格式。
+
+所有安装包、压缩包和内部目录均使用英文、数字等 ASCII 安全名称，避免乱码。发布包内提供：
+
+- `ReadMe.html`：双击后在浏览器中阅读；
+- `ReadMe.txt`：可用记事本直接打开；
+- `Legal`：许可证与第三方组件说明。
+
+用户不需要安装 Markdown 阅读器。
+
+### 为 Portable Lite 自行安装 BabelDOC
 
 1. 安装 64 位 Python 3.10–3.12。
 2. 打开 PowerShell，依次运行：
@@ -32,20 +49,39 @@ py -3.12 -m venv "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env"
 
 5. PDF 模式选择“自动选择”或“智能排版”。
 
-如果电脑上的 Python 命令不是 `py -3.12`，可以将第一行改为 `python -m venv ...`。首次 `--warmup` 会下载模型和字体，需要联网并占用约 1 GB 磁盘空间。
+如果 `py -3.12` 不可用，可将第一条命令改为 `python -m venv ...`。首次 `--warmup` 需要联网下载布局模型和字体。它们属于引擎资源，不计入软件的 100 MB 译文缓存。
+
+---
 
 ## English
 
-GitHub Releases provides two Windows archives with the same application features and version:
+Version 1.3.0 provides three Windows delivery options. All three use the same main application and translation-quality settings.
 
 | Edition | Included | Recommended for | Usage |
 |---|---|---|---|
-| Full `Full-with-BabelDOC` | Application, BabelDOC smart-layout engine, layout models, and fonts | Reports, manuals, papers, and prose-heavy PDFs | Extract the entire folder and run `DocumentTranslator.exe`; do not move only the EXE |
-| Lite `Lite-no-BabelDOC` | Application without BabelDOC | Word, Excel, CSV, drawings, short-label PDFs, or custom engine installations | Extract and run `DocumentTranslator.exe` |
+| **Windows Setup Full** | Application, BabelDOC smart PDF engine, layout models, and fonts | Recommended for most users, especially reports, manuals, and prose-heavy PDFs | Run the installer and follow the setup wizard |
+| **Portable Full** | The same full feature set without system installation | Complete features on a portable or restricted computer | Extract the complete folder and run `DocumentTranslator.exe` |
+| **Portable Lite** | Application without BabelDOC | Word, Excel, CSV, drawings, short-label PDFs, or separately managed BabelDOC installations | Extract the complete folder and run `DocumentTranslator.exe` |
 
-The Lite edition still translates PDFs using strict in-place placement. Automatic mode safely falls back to that engine when BabelDOC is unavailable. The Full edition uses roughly 1 GB after extraction, mostly for local layout models and multilingual fonts. These are not DeepSeek models and do not consume DeepSeek tokens.
+The Setup Full wizard offers Simplified Chinese, English, Russian, Spanish, French, and German, and detects the Windows UI language on every launch.
 
-### Install BabelDOC for the Lite edition
+### Which edition should I choose?
+
+- If unsure, choose **Windows Setup Full**. The smart PDF engine is included by default.
+- If installation is not allowed or preferred, choose **Portable Full**.
+- If download size matters and you mainly process Word, Excel, CSV, or engineering drawings, choose **Portable Lite**.
+
+Portable Lite still translates PDFs with strict in-place placement. Automatic mode safely falls back when BabelDOC is unavailable, and other document formats are unaffected.
+
+Installer, archive, and internal directory names use ASCII characters to prevent garbled filenames. Every package includes:
+
+- `ReadMe.html`, which opens in a web browser;
+- `ReadMe.txt`, which opens in Notepad;
+- `Legal`, containing license and third-party notices.
+
+No Markdown reader is required.
+
+### Install BabelDOC for Portable Lite
 
 1. Install 64-bit Python 3.10–3.12.
 2. Run these commands in PowerShell:
@@ -57,7 +93,13 @@ py -3.12 -m venv "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env"
 & "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env\Scripts\babeldoc.exe" --warmup
 ```
 
-3. Open **Settings → Advanced → High-quality engine** and select `%LOCALAPPDATA%\DocumentTranslator\babeldoc-env\Scripts\babeldoc.exe`.
-4. Select **Automatic** or **Smart layout** as the PDF mode.
+3. Open **Settings → Advanced**.
+4. Select this file under **High-quality engine**:
 
-If `py -3.12` is unavailable, replace it with `python`. The first `--warmup` requires internet access and downloads roughly 1 GB of local resources.
+```text
+%LOCALAPPDATA%\DocumentTranslator\babeldoc-env\Scripts\babeldoc.exe
+```
+
+5. Select **Automatic** or **Smart layout** as the PDF mode.
+
+If `py -3.12` is unavailable, replace the first command with `python -m venv ...`. The first `--warmup` requires internet access to download layout models and fonts. These engine resources are separate from the application's 100 MB translation cache.

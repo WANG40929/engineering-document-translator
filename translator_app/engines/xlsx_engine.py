@@ -4,6 +4,7 @@ import time
 
 from openpyxl import load_workbook
 
+from ..i18n import tr
 from ..models import FileResult
 from ..text_utils import is_translatable
 from .base import TranslationEngine
@@ -28,7 +29,11 @@ class XlsxEngine(TranslationEngine):
 
             def report(done, total):
                 if progress:
-                    progress(str(source), done / max(total, 1), f"正在翻译 Excel 单元格 {done}/{total}")
+                    progress(
+                        str(source),
+                        done / max(total, 1),
+                        tr("progress.excel", done=done, total=total),
+                    )
 
             translations = translator.translate_many(texts, report)
             for cell, value in zip(cells, translations):
@@ -46,4 +51,3 @@ class XlsxEngine(TranslationEngine):
         result.elapsed_seconds = round(time.monotonic() - started, 2)
         result.usage = dict(getattr(translator, "usage", {}))
         return result
-

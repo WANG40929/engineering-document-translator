@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import random
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
 from collections import Counter
 from collections.abc import Callable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
 from .cache import TranslationCache
+from .i18n import tr
 from .text_utils import (
     glossary_signature,
     has_internal_placeholder,
@@ -33,10 +37,69 @@ LANGUAGE_NAMES = {
     "ko": "한국어",
 }
 
-CACHE_POLICY_VERSION = "v2-paragraph-target-only-review"
+CACHE_POLICY_VERSION = "v4-safe-parallel-placeholders"
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LATIN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z-]{1,}")
 PLACEHOLDER_RE = re.compile(r"__UDT_\d{4}__")
+RETRYABLE_HTTP_CODES = {408, 429, 500, 502, 503, 504}
+LONG_SEGMENT_BATCH_THRESHOLD = 1200
+
+
+class AdaptiveRateLimiter:
+    """Small thread-safe limiter that backs off on 429 without user tuning.
+
+    Translation requests are I/O bound, so a few in-flight batches reduce idle
+    network time without changing prompts or model settings. Starts are still
+    spaced to avoid a burst, and a provider-side rate-limit response
+    immediately lowers the rate for every worker.
+    """
+
+    def __init__(self, initial_qps: float, minimum_qps: float = 1.0, maximum_qps: float | None = None):
+        initial = max(minimum_qps, float(initial_qps))
+        self.minimum_qps = max(0.25, float(minimum_qps))
+        self.maximum_qps = max(initial, float(maximum_qps or initial))
+        self._qps = min(self.maximum_qps, initial)
+        self._next_start = 0.0
+        self._successes_since_throttle = 0
+        self._generation = 0
+        self._lock = threading.Lock()
+
+    @property
+    def qps(self) -> float:
+        with self._lock:
+            return self._qps
+
+    def acquire(self) -> None:
+        while True:
+            with self._lock:
+                generation = self._generation
+                now = time.monotonic()
+                scheduled = max(now, self._next_start)
+                self._next_start = scheduled + (1.0 / self._qps)
+            delay = scheduled - now
+            if delay > 0:
+                time.sleep(delay)
+            with self._lock:
+                if generation == self._generation:
+                    return
+
+    def throttle(self, retry_after: float | None = None) -> None:
+        with self._lock:
+            self._qps = max(self.minimum_qps, self._qps * 0.5)
+            self._successes_since_throttle = 0
+            pause = retry_after if retry_after is not None else 1.0 / self._qps
+            self._generation += 1
+            # Invalidate starts reserved under the old rate. Waiting workers
+            # notice the generation change and reserve again at the lower QPS.
+            self._next_start = time.monotonic() + max(0.0, pause)
+
+    def record_success(self) -> None:
+        with self._lock:
+            self._successes_since_throttle += 1
+            # Recover cautiously after a temporary provider-side slowdown.
+            if self._successes_since_throttle >= 8 and self._qps < self.maximum_qps:
+                self._qps = min(self.maximum_qps, self._qps + 0.5)
+                self._successes_since_throttle = 0
 
 
 class DeepSeekError(RuntimeError):
@@ -50,11 +113,25 @@ class IncompleteResponseError(DeepSeekError):
         self.missing = missing
         self.partial = partial
         self.finish_reason = finish_reason
-        reason = f"，结束原因：{finish_reason}" if finish_reason else ""
-        super().__init__(f"接口返回缺少段落：{sorted(missing)}{reason}")
+        reason = (
+            tr("error.finish_reason", reason=finish_reason)
+            if finish_reason
+            else ""
+        )
+        super().__init__(
+            tr(
+                "error.missing_segments",
+                segments=sorted(missing),
+                reason=reason,
+            )
+        )
 
 
 class DeepSeekTranslator:
+    # Engines may aggregate independent document units into one call so this
+    # translator can schedule its internal batches concurrently.
+    supports_parallel_batches = True
+
     def __init__(
         self,
         api_key: str,
@@ -71,7 +148,7 @@ class DeepSeekTranslator:
         force_refresh: bool = False,
     ):
         if not api_key.strip():
-            raise ValueError("请输入 DeepSeek API Key。")
+            raise ValueError(tr("error.api_key_required"))
         self.api_key = api_key.strip()
         self.model = model.strip() or "deepseek-v4-flash"
         self.source_language = source_language
@@ -84,6 +161,12 @@ class DeepSeekTranslator:
         self.pure_target_language = pure_target_language
         self.quality_review = quality_review
         self.force_refresh = force_refresh
+        self._usage_lock = threading.Lock()
+        self._worker_limit = self._automatic_worker_limit()
+        self._rate_limiter = AdaptiveRateLimiter(
+            initial_qps=float(self._worker_limit),
+            maximum_qps=float(self._worker_limit),
+        )
         self.usage = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -97,6 +180,8 @@ class DeepSeekTranslator:
             "split_retries": 0,
             "recovered_segments": 0,
             "transport_retries": 0,
+            "rate_limit_events": 0,
+            "parallel_workers": self._worker_limit,
             "finish_reasons": {},
             "thinking_mode": "disabled",
         }
@@ -108,6 +193,46 @@ class DeepSeekTranslator:
             glossary_signature(self.glossary),
         ))
         self._cache_signature = hashlib.sha256(policy.encode("utf-8")).hexdigest()
+
+    def _automatic_worker_limit(self) -> int:
+        """Choose safe network concurrency automatically; no quality tier."""
+        model = self.model.casefold()
+        if "reasoner" in model:
+            default = 2
+        elif "pro" in model:
+            default = 3
+        else:
+            default = 4
+        override = os.environ.get("UDT_TRANSLATION_CONCURRENCY", "").strip()
+        if override:
+            try:
+                return max(1, min(6, int(override)))
+            except ValueError:
+                pass
+        return default
+
+    def _bump_usage(self, key: str, amount: int = 1) -> None:
+        with self._usage_lock:
+            self.usage[key] = int(self.usage.get(key, 0)) + amount
+
+    def _record_response_usage(self, payload: dict, finish_reason: str) -> None:
+        with self._usage_lock:
+            for key, value in payload.get("usage", {}).items():
+                if key in self.usage and isinstance(value, int):
+                    self.usage[key] += value
+            reasons = self.usage["finish_reasons"]
+            reasons[finish_reason] = reasons.get(finish_reason, 0) + 1
+
+    def _redact_error(self, value: object) -> str:
+        text = str(value)
+        if self.api_key:
+            text = text.replace(self.api_key, "***")
+        return re.sub(
+            r"((?:api[-_ ]?key|authorization)(?:=|:|\s)+)(?:bearer\s+)?\S+",
+            r"\1***",
+            text,
+            flags=re.IGNORECASE,
+        )
 
     def _system_prompt(self) -> str:
         source = LANGUAGE_NAMES.get(self.source_language, self.source_language)
@@ -128,6 +253,94 @@ class DeepSeekTranslator:
             "返回严格 JSON：{\"translations\":[{\"id\":0,\"text\":\"...\"}]}，id 必须与输入一致。"
             + (f"\n必须采用以下术语表：\n{glossary}" if glossary else "")
         )
+
+    def _placeholder_counts_are_valid(self, source: str, translated: str) -> bool:
+        """Keep codes exact while permitting a genuine bilingual merge.
+
+        Target-only mode merges equivalent language halves. A code repeated
+        in both halves should then occur as many times as it did in either one
+        half, rather than as many times as it did in both halves combined.
+        """
+        expected = Counter(placeholder_indexes(source))
+        actual = Counter(placeholder_indexes(translated))
+        if actual == expected:
+            return True
+        if not self.pure_target_language or set(actual) != set(expected):
+            return False
+
+        branch_split = None
+
+        # Packing lists commonly repeat the same material number before the
+        # English and German descriptions. The second occurrence is a strong,
+        # format-derived bilingual boundary even when no slash is present.
+        leading_id = re.match(r"^\s*(\d{5,}(?:\.\d+)?)\s*[,;:]?", source)
+        if leading_id:
+            remainder_start = leading_id.end()
+            repeated_id = re.search(
+                rf"(?<!\w){re.escape(leading_id.group(1))}(?=\s*[,;:])",
+                source[remainder_start:],
+            )
+            if repeated_id:
+                candidate = remainder_start + repeated_id.start()
+                if candidate >= 12 and len(source) - candidate >= 12:
+                    branch_split = candidate
+
+        # Long legal notes often use a central slash between complete language
+        # versions. Internal slashes near either edge are not treated as the
+        # language boundary.
+        separators = [
+            match
+            for match in re.finditer(r"\s+/\s+", source)
+            if match.start() >= 120 and len(source) - match.end() >= 120
+        ]
+        if branch_split is None and separators:
+            separator = min(
+                separators,
+                key=lambda match: abs(match.start() - len(source) / 2),
+            )
+            branch_split = separator.start()
+
+        # A small number of rows omit both the repeated material number and a
+        # slash. Only accept an inferred boundary when the text itself contains
+        # clear English/German parallel markers and a repeated protected value.
+        english_marker = re.search(
+            r"\b(?:the|and|with|without|for|from|to|of|or|according|length)\b",
+            source,
+            re.IGNORECASE,
+        )
+        german_marker = re.search(
+            r"\b(?:der|die|das|und|mit|ohne|nach|von|für|auf|aus|oder|nicht|zum|zur|länge)\b",
+            source,
+            re.IGNORECASE,
+        )
+        if branch_split is None and english_marker and german_marker:
+            positions_by_index: dict[int, list[re.Match]] = {}
+            for match in PLACEHOLDER_RE.finditer(source):
+                positions_by_index.setdefault(
+                    int(match.group(0)[6:10]),
+                    [],
+                ).append(match)
+            candidates = []
+            for positions in positions_by_index.values():
+                if len(positions) >= 2 and len(positions) % 2 == 0:
+                    half = len(positions) // 2
+                    candidates.append(
+                        (positions[half - 1].end() + positions[half].start()) // 2
+                    )
+            if candidates:
+                candidate = min(
+                    candidates,
+                    key=lambda value: abs(value - len(source) / 2),
+                )
+                if candidate >= 12 and len(source) - candidate >= 12:
+                    branch_split = candidate
+
+        if branch_split is None:
+            return False
+        left = Counter(placeholder_indexes(source[:branch_split]))
+        right = Counter(placeholder_indexes(source[branch_split:]))
+        merged = left | right
+        return bool(set(left) & set(right)) and actual == merged
 
     def _request(self, items: list[dict], review: bool = False) -> dict[int, str]:
         system_prompt = self._system_prompt()
@@ -161,48 +374,77 @@ class DeepSeekTranslator:
         last_error: Exception | None = None
         for attempt in range(4):
             try:
-                self.usage["api_attempts"] += 1
+                self._rate_limiter.acquire()
+                self._bump_usage("api_attempts")
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     payload = json.loads(response.read().decode("utf-8"))
-                self.usage["requests"] += 1
-                for key, value in payload.get("usage", {}).items():
-                    if key in self.usage and isinstance(value, int):
-                        self.usage[key] += value
+                self._bump_usage("requests")
                 choice = payload["choices"][0]
                 finish_reason = str(choice.get("finish_reason") or "unknown")
-                reasons = self.usage["finish_reasons"]
-                reasons[finish_reason] = reasons.get(finish_reason, 0) + 1
+                self._record_response_usage(payload, finish_reason)
                 content = choice["message"]["content"]
-                parsed = json.loads(content)
-                translations = parsed.get("translations", parsed if isinstance(parsed, list) else [])
-                result = {int(item["id"]): str(item["text"]) for item in translations}
-                missing = {int(item["id"]) for item in items} - set(result)
+                requested_ids = {int(item["id"]) for item in items}
+                try:
+                    parsed = json.loads(content)
+                    translations = (
+                        parsed.get("translations", [])
+                        if isinstance(parsed, dict)
+                        else parsed
+                        if isinstance(parsed, list)
+                        else []
+                    )
+                    if not isinstance(translations, list):
+                        raise TypeError("translations must be a list")
+                    result = {
+                        int(item["id"]): str(item["text"])
+                        for item in translations
+                    }
+                except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+                    self._bump_usage("schema_failures")
+                    # Truncated JSON (commonly finish_reason=length) is a
+                    # batch-size problem, not a reason to repeat the identical
+                    # large request four times. Reuse the existing resilient
+                    # path so it halves the batch and preserves all successes.
+                    raise IncompleteResponseError(
+                        requested_ids,
+                        {},
+                        finish_reason or "invalid JSON",
+                    ) from exc
+                missing = requested_ids - set(result)
                 if missing:
-                    self.usage["schema_failures"] += 1
+                    self._bump_usage("schema_failures")
                     # Do not repeat the same large request four times. The
                     # caller will preserve valid items and repair only missing
                     # IDs, splitting the batch when necessary.
                     raise IncompleteResponseError(missing, result, finish_reason)
-                expected_by_id = {
-                    int(item["id"]): Counter(placeholder_indexes(str(item.get("text", ""))))
-                    for item in items
-                }
                 invalid = {
-                    item_id
-                    for item_id, expected in expected_by_id.items()
-                    if Counter(placeholder_indexes(result.get(item_id, ""))) != expected
+                    int(item["id"])
+                    for item in items
+                    if not self._placeholder_counts_are_valid(
+                        str(item.get("text", "")),
+                        result.get(int(item["id"]), ""),
+                    )
                 }
                 if invalid:
-                    self.usage["schema_failures"] += 1
+                    self._bump_usage("schema_failures")
                     valid = {item_id: value for item_id, value in result.items() if item_id not in invalid}
                     raise IncompleteResponseError(invalid, valid, "invalid placeholders")
+                self._rate_limiter.record_success()
                 return result
             except IncompleteResponseError:
                 raise
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")[:1000]
-                last_error = DeepSeekError(f"DeepSeek HTTP {exc.code}: {detail}")
-                if exc.code not in {408, 429, 500, 502, 503, 504}:
+                last_error = DeepSeekError(f"DeepSeek HTTP {exc.code}: {self._redact_error(detail)}")
+                if exc.code == 429:
+                    retry_after = None
+                    try:
+                        retry_after = float(exc.headers.get("Retry-After", ""))
+                    except (AttributeError, TypeError, ValueError):
+                        pass
+                    self._rate_limiter.throttle(retry_after)
+                    self._bump_usage("rate_limit_events")
+                if exc.code not in RETRYABLE_HTTP_CODES:
                     break
             except (
                 urllib.error.URLError,
@@ -216,9 +458,14 @@ class DeepSeekTranslator:
             ) as exc:
                 last_error = exc
             if attempt < 3:
-                self.usage["transport_retries"] += 1
+                self._bump_usage("transport_retries")
                 time.sleep((2**attempt) + random.random())
-        raise DeepSeekError(f"DeepSeek 请求失败：{last_error}")
+        raise DeepSeekError(
+            tr(
+                "error.deepseek_request",
+                reason=self._redact_error(last_error),
+            )
+        )
 
     def _request_resilient(
         self,
@@ -239,14 +486,14 @@ class DeepSeekTranslator:
         except IncompleteResponseError as exc:
             result = dict(exc.partial)
             missing_items = [item for item in items if int(item["id"]) in exc.missing]
-            self.usage["recovered_segments"] += len(result)
+            self._bump_usage("recovered_segments", len(result))
             if result and missing_items:
-                self.usage["repair_requests"] += 1
+                self._bump_usage("repair_requests")
                 result.update(self._request_resilient(missing_items, review, depth + 1))
                 return result
             if len(items) > 1:
                 midpoint = len(items) // 2
-                self.usage["split_retries"] += 1
+                self._bump_usage("split_retries")
                 left = self._request_resilient(items[:midpoint], review, depth + 1)
                 right = self._request_resilient(items[midpoint:], review, depth + 1)
                 left.update(right)
@@ -254,9 +501,118 @@ class DeepSeekTranslator:
             # A single segment can still be a transient model-format failure.
             # Retry it twice before surfacing a precise terminal error.
             if single_retry < 2:
-                self.usage["repair_requests"] += 1
+                self._bump_usage("repair_requests")
                 return self._request_resilient(items, review, depth + 1, single_retry + 1)
-            raise DeepSeekError(f"单段翻译仍未返回，段落编号：{items[0]['id']}") from exc
+            raise DeepSeekError(
+                tr(
+                    "error.single_segment_missing",
+                    segment_id=items[0]["id"],
+                )
+            ) from exc
+
+    def _translate_batch(self, batch: Sequence[str], review: bool = False) -> list[tuple[str, str]]:
+        protected = [protect_text(text) for text in batch]
+        items = [{"id": i, "text": value.text} for i, value in enumerate(protected)]
+        translated = self._request_resilient(items, review=review)
+        return [
+            (source, protected_text.restore(translated[local_index]).strip())
+            for local_index, (source, protected_text) in enumerate(zip(batch, protected))
+        ]
+
+    def _run_batches(
+        self,
+        texts: Sequence[str],
+        *,
+        review: bool = False,
+        progress: Callable[[int, int], None] | None = None,
+        on_completed: Callable[[list[tuple[str, str]]], None] | None = None,
+    ) -> list[tuple[str, str]]:
+        """Translate independent batches concurrently and checkpoint each success."""
+        batches: list[list[str]] = []
+        current: list[str] = []
+        for text in texts:
+            # A long legal note should not make dozens of short, already valid
+            # segments wait for its repair path. Isolating it preserves context
+            # inside the paragraph and lets every other batch checkpoint.
+            if len(text) > LONG_SEGMENT_BATCH_THRESHOLD:
+                if current:
+                    batches.append(current)
+                    current = []
+                batches.append([text])
+                continue
+            current.append(text)
+            if len(current) >= self.batch_size:
+                batches.append(current)
+                current = []
+        if current:
+            batches.append(current)
+        if not batches:
+            return []
+
+        total = len(texts)
+        done = 0
+        completed_pairs: list[tuple[str, str]] = []
+
+        def accept(pairs: list[tuple[str, str]]) -> None:
+            nonlocal done
+            # Persist before reporting progress. If another batch later fails,
+            # a retry reuses every already completed segment.
+            self.cache.put_many(
+                self.source_language,
+                self.target_language,
+                pairs,
+                self._cache_signature,
+            )
+            if on_completed:
+                on_completed(pairs)
+            completed_pairs.extend(pairs)
+            done += len(pairs)
+            if review:
+                self._bump_usage("quality_retries", len(pairs))
+            if progress:
+                progress(min(done, total), total)
+
+        worker_count = min(self._worker_limit, len(batches))
+        if worker_count <= 1:
+            for batch in batches:
+                accept(self._translate_batch(batch, review=review))
+            return completed_pairs
+
+        failures: list[Exception] = []
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="udt-translate",
+        ) as executor:
+            batch_iterator = iter(batches)
+            future_to_batch: dict[Future, list[str]] = {}
+
+            def submit_next() -> bool:
+                try:
+                    batch = next(batch_iterator)
+                except StopIteration:
+                    return False
+                future_to_batch[
+                    executor.submit(self._translate_batch, batch, review)
+                ] = batch
+                return True
+
+            for _ in range(worker_count):
+                submit_next()
+            while future_to_batch:
+                # Keep only a bounded number of requests in flight. If one
+                # batch fails permanently, no new batches are launched, while
+                # already-running successes are still checkpointed.
+                future = next(as_completed(tuple(future_to_batch)))
+                future_to_batch.pop(future)
+                try:
+                    accept(future.result())
+                except Exception as exc:
+                    failures.append(exc)
+                if not failures:
+                    submit_next()
+        if failures:
+            raise failures[0]
+        return completed_pairs
 
     def translate_many(
         self,
@@ -298,24 +654,16 @@ class DeepSeekTranslator:
             if text in cached_values:
                 for index in indexes:
                     output[index] = cached_values[text]
-                self.usage["cache_hits"] += len(indexes)
+                self._bump_usage("cache_hits", len(indexes))
             else:
                 pending.append(text)
-        total = len(pending)
-        for start in range(0, total, self.batch_size):
-            batch = pending[start : start + self.batch_size]
-            protected = [protect_text(text) for text in batch]
-            items = [{"id": i, "text": value.text} for i, value in enumerate(protected)]
-            translated = self._request_resilient(items)
-            cache_pairs = []
-            for local_index, (source, protected_text) in enumerate(zip(batch, protected)):
-                value = protected_text.restore(translated[local_index]).strip()
+
+        def apply_pairs(pairs: list[tuple[str, str]]) -> None:
+            for source, value in pairs:
                 for output_index in indexes_by_text[source]:
                     output[output_index] = value
-                cache_pairs.append((source, value))
-            self.cache.put_many(self.source_language, self.target_language, cache_pairs, self._cache_signature)
-            if progress:
-                progress(min(start + len(batch), total), total)
+
+        self._run_batches(pending, progress=progress, on_completed=apply_pairs)
         if self.quality_review and self.pure_target_language:
             self._review_residuals(texts, output, indexes_by_text)
         return output
@@ -341,19 +689,13 @@ class DeepSeekTranslator:
             first_index = indexes_by_text[source][0]
             if self._needs_review(source, output[first_index]):
                 suspects.append(source)
-        for start in range(0, len(suspects), self.batch_size):
-            batch = suspects[start : start + self.batch_size]
-            protected = [protect_text(text) for text in batch]
-            items = [{"id": i, "text": value.text} for i, value in enumerate(protected)]
-            reviewed = self._request_resilient(items, review=True)
-            cache_pairs = []
-            for local_index, (source, protected_text) in enumerate(zip(batch, protected)):
-                value = protected_text.restore(reviewed[local_index]).strip()
+
+        def apply_pairs(pairs: list[tuple[str, str]]) -> None:
+            for source, value in pairs:
                 for output_index in indexes_by_text[source]:
                     output[output_index] = value
-                cache_pairs.append((source, value))
-            self.cache.put_many(self.source_language, self.target_language, cache_pairs, self._cache_signature)
-            self.usage["quality_retries"] += len(batch)
+
+        self._run_batches(suspects, review=True, on_completed=apply_pairs)
 
 
 def normalize_for_compare(text: str) -> str:

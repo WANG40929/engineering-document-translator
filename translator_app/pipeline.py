@@ -7,10 +7,9 @@ from datetime import datetime
 from pathlib import Path
 
 from .engines import BabelDocEngine, CsvEngine, DocEngine, DocxEngine, PdfEngine, XlsxEngine
+from .file_types import SUPPORTED_EXTENSIONS, collect_files
+from .i18n import tr
 from .models import FileResult, ProgressCallback, TranslationOptions
-
-
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".xlsx", ".xlsm", ".csv", ".tsv"}
 
 
 class TranslationPipeline:
@@ -49,6 +48,30 @@ class TranslationPipeline:
                 hasher.update(chunk)
         return hasher.hexdigest()
 
+    @staticmethod
+    def _duplicate_additional_path(
+        previous_primary: Path,
+        previous_additional: Path,
+        duplicate_primary: Path,
+        index: int,
+    ) -> Path:
+        relative_tag = ""
+        if previous_additional.stem.startswith(previous_primary.stem):
+            relative_tag = previous_additional.stem[len(previous_primary.stem):]
+        if not relative_tag:
+            relative_tag = f"_EXTRA_{index}"
+        extension = previous_additional.suffix or duplicate_primary.suffix
+        candidate = duplicate_primary.with_name(
+            f"{duplicate_primary.stem}{relative_tag}{extension}"
+        )
+        number = 2
+        while candidate.exists():
+            candidate = duplicate_primary.with_name(
+                f"{duplicate_primary.stem}{relative_tag}_{number}{extension}"
+            )
+            number += 1
+        return candidate
+
     def run(self, files, translator, options, progress: ProgressCallback | None = None):
         sources = [Path(value) for value in files]
         results: list[FileResult] = []
@@ -62,20 +85,77 @@ class TranslationPipeline:
         file_fractions = [0.0] * total
         for index, source in enumerate(sources):
             if progress:
-                progress(str(source), sum(file_fractions) / max(total, 1), f"准备处理 {index + 1}/{total}：{source.name}")
+                progress(
+                    str(source),
+                    sum(file_fractions) / max(total, 1),
+                    tr(
+                        "progress.preparing_file",
+                        current=index + 1,
+                        total=total,
+                        name=source.name,
+                    ),
+                )
             if not source.exists():
-                results.append(FileResult(str(source), status="failed", errors=["文件不存在"])); continue
+                results.append(
+                    FileResult(
+                        str(source),
+                        status="failed",
+                        errors=[tr("error.file_not_found")],
+                    )
+                )
+                continue
             engine = self.engine_for(source, options)
             if not engine:
-                results.append(FileResult(str(source), status="unsupported", errors=[f"暂不支持 {source.suffix} 格式"])); continue
+                results.append(
+                    FileResult(
+                        str(source),
+                        status="unsupported",
+                        errors=[
+                            tr(
+                                "error.unsupported_format",
+                                extension=source.suffix,
+                            )
+                        ],
+                    )
+                )
+                continue
             digest = self._digest(source) if size_counts.get(source.stat().st_size, 0) > 1 else ""
             previous = completed_by_hash.get(digest) if digest else None
             destination = self.output_path(source, options)
             if previous and previous.output_path and Path(previous.output_path).exists():
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(previous.output_path, destination)
-                duplicate = FileResult(str(source), str(destination), "completed", "duplicate copy")
-                duplicate.warnings.append(f"与 {Path(previous.input_path).name} 内容相同，复用翻译结果，未调用 API")
+                previous_primary = Path(previous.output_path)
+                shutil.copy2(previous_primary, destination)
+                duplicate = FileResult(
+                    input_path=str(source),
+                    output_path=str(destination),
+                    status="completed",
+                    engine="duplicate copy",
+                    translated_units=previous.translated_units,
+                    skipped_units=previous.skipped_units,
+                    skipped_pages=list(previous.skipped_pages),
+                )
+                for additional_index, previous_output in enumerate(
+                    previous.additional_outputs,
+                    start=1,
+                ):
+                    previous_additional = Path(previous_output)
+                    if not previous_additional.is_file():
+                        continue
+                    additional_destination = self._duplicate_additional_path(
+                        previous_primary,
+                        previous_additional,
+                        destination,
+                        additional_index,
+                    )
+                    shutil.copy2(previous_additional, additional_destination)
+                    duplicate.additional_outputs.append(str(additional_destination))
+                duplicate.warnings.append(
+                    tr(
+                        "error.duplicate_reused",
+                        name=Path(previous.input_path).name,
+                    )
+                )
                 results.append(duplicate)
                 file_fractions[index] = 1.0
                 continue
@@ -93,7 +173,11 @@ class TranslationPipeline:
                 completed_by_hash[digest] = result
         if progress:
             fraction = sum(file_fractions) / max(total, 1) if total else 1.0
-            message = "批处理完成" if all(result.status == "completed" for result in results) else "处理结束，存在失败文件"
+            message = (
+                tr("progress.batch_complete")
+                if all(result.status == "completed" for result in results)
+                else tr("progress.batch_with_failures")
+            )
             progress("", fraction, message)
         return results
 
@@ -114,8 +198,3 @@ def write_report(results: list[FileResult], output_dir: Path) -> Path:
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
-
-
-def collect_files(path: Path, recursive: bool = True) -> list[Path]:
-    iterator = path.rglob("*") if recursive else path.glob("*")
-    return sorted(p for p in iterator if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS and not p.stem.endswith(("_ZH", "_EN", "_RU")))

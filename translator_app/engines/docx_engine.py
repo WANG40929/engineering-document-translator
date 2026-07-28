@@ -4,6 +4,7 @@ import time
 
 from docx import Document
 
+from ..i18n import tr
 from ..models import FileResult
 from ..text_utils import is_translatable
 from .base import TranslationEngine
@@ -36,7 +37,17 @@ class DocxEngine(TranslationEngine):
         result = FileResult(str(source), str(destination), engine="DOCX")
         try:
             document = Document(source)
-            paragraphs = list(_all_paragraphs(document))
+            # python-docx exposes a merged cell once for each grid position,
+            # even though those wrappers point to the same XML paragraph.
+            # Translate each real paragraph once to avoid duplicate work and
+            # repeated writes in large packing lists.
+            paragraphs = []
+            seen_paragraphs = set()
+            for paragraph in _all_paragraphs(document):
+                if paragraph._p in seen_paragraphs:
+                    continue
+                seen_paragraphs.add(paragraph._p)
+                paragraphs.append(paragraph)
             units = []
             for paragraph in paragraphs:
                 text_runs = [run for run in paragraph.runs if run.text]
@@ -47,7 +58,11 @@ class DocxEngine(TranslationEngine):
 
             def report(done, total):
                 if progress:
-                    progress(str(source), done / max(total, 1), f"正在翻译 Word 文本 {done}/{total}")
+                    progress(
+                        str(source),
+                        done / max(total, 1),
+                        tr("progress.word", done=done, total=total),
+                    )
 
             translated = translator.translate_many(texts, report)
             for (runs, _source_text), value in zip(units, translated):

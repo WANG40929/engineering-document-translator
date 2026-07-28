@@ -7,6 +7,7 @@ from ctypes import wintypes
 from pathlib import Path
 
 from .config import app_data_dir
+from .i18n import tr
 
 
 class DATA_BLOB(ctypes.Structure):
@@ -30,7 +31,7 @@ class SecretStore:
             self.clear()
             return
         if os.name != "nt":
-            raise RuntimeError("安全密钥存储目前仅支持 Windows。")
+            raise RuntimeError(tr("error.secure_store_windows"))
         in_blob, in_buffer = self._blob(secret.encode("utf-8"))
         out_blob = DATA_BLOB()
         crypt32 = ctypes.windll.crypt32

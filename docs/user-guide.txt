@@ -1,0 +1,165 @@
+文档智能翻译器 / Document Translator
+版本：v{{VERSION}}
+发行类型：{{EDITION}}
+============================================================
+
+一、五步开始翻译
+
+1. 双击 DocumentTranslator.exe。
+2. 打开右上角“设置”，填写自己的 DeepSeek API Key，确认接口地址和模型后保存。
+3. 把 PDF、Word、Excel 或 CSV 文件拖入窗口，也可以点击选择文件。
+4. 确认源语言、目标语言和输出目录，点击“开始翻译”。
+5. 完成后点击任务右侧的“打开”，或点击“打开文件夹”定位译文。
+
+推荐：PDF 模式保持“自动选择”。软件会根据页面内容选择智能排版或原位保版。
+
+
+二、三个发行版本
+
+Windows Setup Full（安装完整版）
+  - 推荐大多数用户使用。
+  - 默认安装主程序、BabelDOC 智能 PDF 引擎、版面模型和字体。
+  - 自动创建开始菜单、可选桌面快捷方式和卸载入口。
+
+Portable Full（免安装完整版）
+  - 翻译能力与安装完整版相同。
+  - 必须完整解压后运行，不要只复制 EXE。
+
+Portable Lite（免安装轻量版）
+  - 不含 BabelDOC，文件更小。
+  - 仍支持原位保版 PDF、Word、Excel 和 CSV。
+  - 适合主要翻译工程图纸、清单，或准备自行安装 BabelDOC 的用户。
+
+
+三、文件夹里的内容
+
+DocumentTranslator.exe
+  主程序，双击它启动。
+
+ApplicationFiles
+  主程序运行文件。请勿删除、改名或单独移动 EXE。
+
+TranslationEngine
+  完整版的智能 PDF 引擎。请勿删除或改名。
+
+ReadMe.html / ReadMe.txt
+  使用说明，可直接双击打开。
+
+Legal
+  本软件和第三方组件的许可证及来源说明。
+
+
+四、PDF 模式
+
+自动选择（推荐）
+  报告、手册和论文等连续正文优先使用智能排版；工程图纸、铭牌和短标签
+  PDF 优先使用原位保版。
+
+智能排版
+  BabelDOC 分析段落、字体和页面结构，DeepSeek 完成翻译，然后重新排版。
+
+原位保版
+  尽量在原文字坐标处替换内容，适合工程图纸、表格和固定位置文字。
+
+PDF 可以输出纯译文、双语对照，或同时生成两者。图片内部文字默认不进行
+OCR 翻译。
+
+
+五、进度、速度和缓存
+
+- PDF 会显示版面分析、术语处理、正文翻译、重新排版和输出等阶段。
+- 预计剩余时间根据近期速度计算，网络波动时可能调整。
+- 软件会复用相同文本和已成功结果，在不降低模型、术语和排版质量的前提下
+  减少等待。
+- 主翻译缓存超过 100 MB 后按时间自动清理。
+- 智能引擎的版面模型和字体不属于 100 MB 主翻译缓存。
+- 可以在设置中选择 CSV、TSV、TXT 或 XLSX 术语表，软件会记住并继续使用。
+- v1.3.0 尚不会自动建立永久术语库；译文缓存也不等于术语库。
+
+
+六、轻量版自行安装 BabelDOC
+
+只有需要“智能排版”PDF 时才需要执行本节。安装需要联网。
+
+1. 安装 64 位 Python 3.12。
+2. 打开 PowerShell，逐行运行：
+
+py -3.12 -m venv "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env"
+& "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env\Scripts\python.exe" -m pip install --upgrade pip
+& "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env\Scripts\python.exe" -m pip install BabelDOC==0.6.4
+& "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env\Scripts\babeldoc.exe" --warmup
+
+3. 在软件“设置 -> 高级”中选择：
+
+%LOCALAPPDATA%\DocumentTranslator\babeldoc-env\Scripts\babeldoc.exe
+
+如果电脑没有 py -3.12 命令，可将第一行开头改为 python。
+
+
+七、常见问题
+
+双击后没有立即出现窗口
+  v1.3.0 已改用文件夹式运行结构，减少每次启动时的解压。首次运行仍可能被
+  Windows Defender 扫描，请等待片刻，不要反复双击。
+
+提示没有智能 PDF 引擎
+  完整版请确认 TranslationEngine 与主程序在同一目录；轻量版请按第六节
+  安装并在设置中选择 babeldoc.exe。
+
+进度一段时间没有变化
+  查看任务阶段文字。首次加载版面模型、等待 DeepSeek 网络响应或大页面重新
+  排版可能需要时间；只有软件明确报告停滞或失败时才需要重试。
+
+翻译文件在哪里
+  输出目录显示在主界面顶部。完成后点击“打开”或“打开文件夹”。
+
+API Key 会随安装包公开吗
+  不会。公开包不包含 API Key、用户配置、翻译缓存、报告或源文档。
+
+
+============================================================
+ENGLISH QUICK GUIDE
+============================================================
+
+1. Run DocumentTranslator.exe.
+2. Open Settings and enter your own DeepSeek API key, endpoint, and model.
+3. Drag PDF, Word, Excel, or CSV files into the window.
+4. Choose source language, target language, and output folder, then start.
+5. When complete, select Open File or Open Folder beside the task.
+
+EDITIONS
+
+- Setup Full: recommended; installs the application and bundled BabelDOC engine.
+- Portable Full: same features without installation. Extract everything first.
+- Portable Lite: no BabelDOC. Strict PDF, Word, Excel, and CSV remain available.
+
+REQUIRED FOLDERS
+
+- ApplicationFiles is required by the application.
+- TranslationEngine is required by the Full edition.
+- Do not move only DocumentTranslator.exe.
+
+PDF MODES
+
+Automatic is recommended. Smart Layout is best for reports and manuals. Strict
+Layout is best for drawings, labels, tables, and fixed-position content.
+Image-only text is not OCR-translated by default.
+
+GLOSSARIES AND CACHE
+
+The selected CSV, TSV, TXT, or XLSX glossary is remembered and reused. v1.3.0
+does not automatically build a permanent terminology library. Translation
+cache is capped at 100 MB and is not a terminology database.
+
+INSTALL BABELDOC FOR LITE
+
+Install 64-bit Python 3.12, run the four PowerShell commands in section 6, then
+select babeldoc.exe under Settings -> Advanced.
+
+PRIVACY
+
+Release packages contain no API key, user configuration, translation cache,
+report, or source document.
+
+Project and updates:
+https://github.com/WANG40929/engineering-document-translator

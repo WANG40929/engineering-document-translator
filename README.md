@@ -3,23 +3,21 @@
 </p>
 
 <h1 align="center">文档智能翻译器</h1>
-<h3 align="center">Document Translator</h3>
+<h3 align="center">Document Translator · v1.3.0</h3>
 
 <p align="center">
   保留版式、保护技术编号，批量翻译 PDF、Word、Excel 和 CSV 等文档。<br>
-  Translate PDFs, Word files, spreadsheets, and CSV files while preserving layout and technical identifiers.
+  Translate PDF, Word, Excel, and CSV documents while preserving layout and technical identifiers.
 </p>
 
 <p align="center">
-  <a href="https://github.com/WANG40929/engineering-document-translator/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/WANG40929/engineering-document-translator?style=flat-square&color=F47A3C"></a>
+  <a href="https://github.com/WANG40929/engineering-document-translator/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/WANG40929/engineering-document-translator?style=flat-square&color=276EF1"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows-23262B?style=flat-square">
-  <img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white">
-  <img alt="DeepSeek" src="https://img.shields.io/badge/DeepSeek-V4-4D6BFE?style=flat-square">
   <a href="LICENSE.txt"><img alt="License" src="https://img.shields.io/badge/license-AGPL--3.0-23262B?style=flat-square"></a>
 </p>
 
 <p align="center">
-  <strong><a href="https://github.com/WANG40929/engineering-document-translator/releases/latest">下载 Windows 正式版 / Download for Windows</a></strong>
+  <strong><a href="https://github.com/WANG40929/engineering-document-translator/releases/latest">下载 Windows 版本 / Windows downloads</a></strong>
   · <a href="#中文">中文</a>
   · <a href="#english">English</a>
   · <a href="CHANGELOG.md">更新日志 / Changelog</a>
@@ -33,77 +31,72 @@
 
 ## 中文
 
-### 为什么做这个项目？
+### 选择下载版本
 
-普通翻译工具往往只关心文字，却容易破坏工程文档的表格、图纸、页眉页脚和技术编号。本项目专门面向工程手册、图纸、装箱单、设备清单等文件：只处理已有文字层，尽量保留原文件结构，并在发送API请求前保护图号、KKS、标准号、尺寸和单位。
+v1.3.0 提供三种 Windows 版本：
 
-### 下载哪个版本？
+| 版本 | 包含 BabelDOC 智能 PDF 引擎 | 适合谁 |
+|---|---:|---|
+| **Windows Setup Full（安装完整版）** | 是 | 推荐大多数用户；按向导安装，智能 PDF 引擎默认内置 |
+| **Portable Full（免安装完整版）** | 是 | 不希望安装；解压完整文件夹后使用 |
+| **Portable Lite（免安装轻量版）** | 否 | 主要翻译 Word、Excel、CSV、图纸或短标签 PDF；也可自行安装 BabelDOC |
 
-| 版本 | 是否包含智能 PDF 引擎 | 推荐用途 |
+安装向导支持简体中文、英语、俄语、西班牙语、法语和德语，并在每次启动时按 Windows 界面语言自动选择。
+
+安装包和压缩包名称均使用英文、数字等 ASCII 字符，避免在不同解压软件中出现乱码。每个发布包都提供浏览器可直接打开的 `ReadMe.html` 和普通文本 `ReadMe.txt`，不要求用户会打开 Markdown 文件。详细区别和 Lite 版安装引擎的方法见 [下载版本说明](docs/DOWNLOADS.md)。
+
+### 开始使用
+
+1. 从 [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest) 选择上面的一种 Windows 安装包或压缩包。
+2. 打开软件，在“设置”中填写自己的 DeepSeek API Key，并选择目标语言。
+3. 拖入文件或文件夹，点击“开始翻译”。
+4. 完成后直接点击“打开文件”或“打开文件夹”查看结果。
+
+源文件不会被覆盖，译文会自动添加语言后缀。程序界面支持跟随系统语言，也可手动切换为：
+
+- 简体中文
+- English
+- Русский（俄语）
+- Español（西班牙语）
+- Français（法语）
+- Deutsch（德语）
+
+### 支持的文档
+
+| 格式 | 处理方式 | 主要保留内容 |
 |---|---|---|
-| **完整版 / Full** | 包含 BabelDOC、布局模型和字体，解压后约 1 GB | 报告、说明书、论文等连续正文 PDF；下载后直接使用智能排版 |
-| **轻量版 / Lite** | 不包含 BabelDOC，体积较小 | Word、Excel、CSV、工程图纸和短标签 PDF；也可自行安装引擎 |
-
-两个版本的主程序功能完全相同。轻量版找不到 BabelDOC 时会自动使用“原位保版”，不会影响其他格式。详细区别和自行安装方法见 [下载版本说明 / Download Editions](docs/DOWNLOADS.md)。完整版必须解压整个文件夹运行，不要只移动其中的 EXE。
-
-### 三步开始使用
-
-1. 从 [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest) 下载最新版 Windows EXE。
-2. 启动软件，在“设置”中填写自己的 DeepSeek API Key，并选择目标语言。
-3. 拖入文件或文件夹，点击“开始翻译”。源文件不会被覆盖，译文会自动添加语言后缀。
-
-> 默认模型是 `deepseek-v4-flash`，适合快速、低成本的批量翻译；复杂内容可切换到 `deepseek-v4-pro`。
-
-### 支持的文件
-
-| 格式 | 处理方式 | 保留内容 |
-|---|---|---|
-| PDF | 自动选择“智能排版”或“原位保版”；可生成纯译文或中外文对照 PDF | 图片、矢量线条、页面尺寸和页数 |
-| DOCX | 按完整段落翻译正文、表格、页眉和页脚 | 段落、表格和主要字符样式 |
+| PDF | 自动选择智能排版或原位保版；可生成纯译文或双语 PDF | 图片、矢量线条、页面尺寸和页数 |
+| DOCX | 翻译正文、表格、页眉和页脚 | 段落、表格和主要字符样式 |
 | XLSX / XLSM | 只翻译字符串单元格 | 公式、数值、样式和工作表结构 |
-| CSV / TSV | 按原编码和分隔符读写 | 行列结构和分隔符 |
+| CSV / TSV | 按检测到的编码和分隔符读写 | 行列结构和分隔符 |
 | DOC | 通过本机 Microsoft Word 转换并回存 | 原 `.doc` 格式；需要安装 Word |
 
-### 核心功能
+只翻译已有文字层；扫描图片、PDF 转曲文字和没有文字层的页面不会翻译。
 
-- **保留版式：** 不把文档粗暴转换成纯文本。
-- **双 PDF 引擎：** 报告和说明书可使用 BabelDOC 重建段落与排版；工程图纸和短标签继续使用精确原位替换。
-- **PDF 输出形式：** 可选择纯译文、中外文对照，或同时生成两种 PDF。
-- **技术编号保护：** 图号、物料号、KKS、标准号、尺寸、单位、网址等使用占位符保护。
-- **文件队列：** 支持多文件、文件夹和拖放；已完成文件不会自动重复处理。
-- **长文档容错：** 接口漏掉部分段落时只补译缺失内容，必要时自动拆小批次，不让单次不完整返回报废整份文件。
-- **真实进度：** 按文字段落计算进度，显示当前页、已用时间和动态预计剩余时间；失败时停在实际位置。
-- **任务控制：** 翻译运行时可请求停止；停止按钮在空闲状态自动隐藏。
-- **翻译质量检查：** 可自动复核疑似未翻译的物料名称和普通技术词。
-- **术语表：** 支持 CSV、TSV、TXT、XLSX；选择后会记住路径，并在后续文件中继续使用。
-- **纯目标语言：** 可选地把双语字段合并成单一目标语言，默认不勾选。
-- **缓存与成本控制：** 相同文字跨文件复用；缓存上限 100 MB，超限后自动删除最旧记录并压缩至约 90 MB。
-- **密钥安全：** API Key 使用 Windows DPAPI 加密，只能由当前 Windows 用户读取，不会写入项目或报告。
+### v1.3.0 重点改进
 
-### 高质量 PDF 引擎
+- **更快启动：** 主界面按需加载翻译组件，改用文件夹式程序结构，并用轻量启动画面提示正在打开。
+- **可用的 PDF 进度：** 显示解析、版面分析、术语、翻译、排版、字体和保存等真实阶段，同时显示已用时间与动态预计剩余时间。
+- **直接打开结果：** 每个已完成任务都可打开译文或所在文件夹。
+- **在不降低质量的前提下提速：** 多批次翻译并行处理，受速率限制时自动退让；已完成批次及时写入缓存，重试和后续文件可继续复用。
+- **技术内容保护：** 图号、物料号、KKS、标准号、尺寸、单位和网址等在翻译前受到保护。
+- **稳定的缓存上限：** 译文缓存仍限制为 100 MB，超过后按时间删除最旧记录并压缩至约 90 MB。
 
-“智能排版”使用可选的 [BabelDOC](https://github.com/funstory-ai/BabelDOC) 后端。它适合报告、手册和连续正文；“原位保版”适合图纸、图签、设备标签和短文本。自动模式会根据文档内容选择，找不到 BabelDOC 时安全回退到原位保版。
+### PDF 引擎与术语
 
-安装 BabelDOC 后，在“设置 → 高级 → 高质量引擎”中选择 `babeldoc.exe`。源码环境可使用：
+“智能排版”使用 [BabelDOC](https://github.com/funstory-ai/BabelDOC)，适合报告、手册和连续正文；“原位保版”适合工程图纸、图签、设备标签和短文本。Setup Full 和 Portable Full 已包含 BabelDOC；Portable Lite 找不到该引擎时会安全回退到原位保版。
 
-```powershell
-python -m venv .babeldoc-env
-uv pip install --python .babeldoc-env\Scripts\python.exe BabelDOC==0.6.4
-.babeldoc-env\Scripts\babeldoc.exe --warmup
-```
+BabelDOC 的程序、布局模型和字体不属于 100 MB 译文缓存，也不会被缓存清理。API Key 仅通过任务临时配置传递，任务结束后删除，并从错误信息中脱敏。
 
-BabelDOC 的程序、布局模型和字体目前约占 1 GB，属于可选程序资源，不计入 100 MB 译文缓存，也不会被缓存清理误删。API Key 通过任务专用临时配置传给本地后端，任务结束立即删除，并从错误信息中脱敏。
+软件支持 CSV、TSV、TXT 和 XLSX 术语表。用户选择的术语表会被记住，并在后续文件中继续使用。智能 PDF 可进行当前文档内的术语提取，但本版本**不会自动建立并永久积累一个可审核的术语库**；译文缓存也不等于术语库。
 
-### 术语表格式
+### 已知限制
 
-前两列分别填写“源术语”和“目标术语”：
-
-```csv
-lube oil,润滑油
-bearing pedestal,轴承座
-```
-
-人工确认的术语表会跨文件持续复用。智能 PDF 模式还会调用 BabelDOC 的文档内自动术语提取；可审核、可永久积累的自动术语库仍在规划中，缓存不能替代术语库。
+- 扫描件需要 OCR；本版本默认不处理没有文字层的页面。
+- 很密集的 PDF 图签或明显变长的译文可能需要缩小字体。
+- DOCX 文本框、SmartArt 和嵌入对象中的文字暂未处理。
+- 旧版 `.doc` 支持依赖本机 Microsoft Word。
+- 建议先用代表性文件验证术语和版式，再批量处理大型项目。
 
 ### 从源码运行
 
@@ -116,30 +109,14 @@ python -m pip install -r requirements.txt
 python -m translator_app
 ```
 
-命令行示例：
-
-```powershell
-$env:DEEPSEEK_API_KEY="你的密钥"
-python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
-```
-
-### 已知限制
-
-- 扫描图片、PDF转曲文字和没有文字层的页面不会翻译。
-- 智能 PDF 模式需要单独安装 BabelDOC；其首次模型准备时间和磁盘占用高于原位保版模式。
-- 很密集的 PDF 图签或过长译文可能需要缩小字体。
-- DOCX 文本框、SmartArt 和嵌入对象中的文字暂未处理。
-- 旧版 `.doc` 依赖 Microsoft Word。
-- 建议先用少量代表性文件验证术语和版式，再处理大型项目文件。
-
-### 下一步计划
+### 后续计划
 
 - [ ] 可审核、可复用的自动术语库
-- [ ] 可选 OCR 模块（保持默认不处理扫描页）
+- [ ] 可选 OCR 模块
 - [ ] 更直观的翻译质量报告
-- [ ] Windows 安装包与自动更新提示
+- [ ] 自动更新提示
 
-如果这个项目对你有帮助，欢迎点一个 **Star**，或通过 [Issues](https://github.com/WANG40929/engineering-document-translator/issues) 提交样本文档类型、问题和建议。
+如果这个项目对你有帮助，欢迎点一个 **Star**，或通过 [Issues](https://github.com/WANG40929/engineering-document-translator/issues) 提交问题和建议。
 
 ---
 
@@ -147,63 +124,65 @@ python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
 
 ## English
 
-### Why this project?
+### Choose a download
 
-General-purpose translators focus on text and may damage tables, drawings, headers, footers, and technical identifiers. This application is built for engineering manuals, drawings, packing lists, and equipment schedules. It translates existing text layers only, preserves the document structure where practical, and protects drawing numbers, KKS identifiers, standards, dimensions, and units before sending text to the API.
+Version 1.3.0 provides three Windows editions:
 
-### Get started in three steps
+| Edition | BabelDOC smart PDF engine included | Recommended for |
+|---|---:|---|
+| **Windows Setup Full** | Yes | Recommended for most users; guided installation with the engine included by default |
+| **Portable Full** | Yes | No installation; extract the complete folder before use |
+| **Portable Lite** | No | Word, Excel, CSV, drawings, and short-label PDFs; BabelDOC can be installed separately |
 
-1. Download the latest Windows EXE from [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest).
-2. Start the application, enter your own DeepSeek API key under **Settings**, and select a target language.
-3. Drop files or folders into the window and click **Start Translation**. Source files are never overwritten; translated files receive a language suffix.
+The setup wizard supports Simplified Chinese, English, Russian, Spanish, French, and German, and detects the Windows UI language on every launch.
 
-> `deepseek-v4-flash` is the default model for fast, cost-effective batch translation. Select `deepseek-v4-pro` for more demanding content.
+Package and archive names use ASCII characters to prevent garbled filenames in older archive tools. Every package contains a browser-friendly `ReadMe.html` and plain-text `ReadMe.txt`; users do not need a Markdown reader. See [Download Editions](docs/DOWNLOADS.md) for details and Lite-edition engine setup.
 
-### Supported files
+### Get started
 
-| Format | Processing | Preserved content |
+1. Choose a Windows installer or portable archive from [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest).
+2. Open the application, enter your DeepSeek API key under **Settings**, and select a target language.
+3. Drop files or folders into the window and click **Start Translation**.
+4. When a task finishes, use **Open file** or **Open folder** to view the result.
+
+Source files are never overwritten; translated files receive a language suffix. The interface can follow Windows automatically or be set to Simplified Chinese, English, Russian, Spanish, French, or German.
+
+### Supported documents
+
+| Format | Processing | Mainly preserved |
 |---|---|---|
-| PDF | Automatically selects smart reflow or strict in-place replacement; supports mono and bilingual output | Images, vector drawings, page sizes, and page count |
-| DOCX | Translates body text, tables, headers, and footers with paragraph context | Paragraphs, tables, and primary character styles |
-| XLSX / XLSM | Translates string cells only | Formulas, values, styles, and workbook structure |
-| CSV / TSV | Reads and writes using the detected encoding and delimiter | Rows, columns, and delimiters |
-| DOC | Converts and saves through local Microsoft Word | Legacy `.doc` format; Word is required |
+| PDF | Automatic smart reflow or strict in-place placement; translated-only and bilingual output | Images, vector drawings, page sizes, and page count |
+| DOCX | Body text, tables, headers, and footers | Paragraphs, tables, and primary character styles |
+| XLSX / XLSM | String cells only | Formulas, values, styles, and workbook structure |
+| CSV / TSV | Detected encoding and delimiter | Rows, columns, and delimiters |
+| DOC | Conversion and save through local Microsoft Word | Legacy `.doc` format; Word is required |
 
-### Key features
+Only existing text layers are translated. Scanned images, outlined PDF text, and pages without a text layer are left unchanged.
 
-- **Layout preservation:** Documents are not flattened into plain text.
-- **Dual PDF engines:** BabelDOC rebuilds paragraphs for reports and manuals, while strict in-place replacement remains available for drawings and short labels.
-- **PDF output choices:** Generate translated-only, bilingual, or both PDF variants.
-- **Technical-token protection:** Drawing numbers, material IDs, KKS tags, standards, dimensions, units, and URLs are protected with placeholders.
-- **Batch queue:** Supports files, folders, and drag-and-drop. Completed files are not processed again automatically.
-- **Long-document recovery:** Repairs only omitted segments and recursively splits invalid batches instead of failing the whole file.
-- **Real progress:** Tracks text units, current PDF page, elapsed time, and a dynamic ETA without falsely showing 100% after failure.
-- **Translation review:** Can retry likely untranslated material names and ordinary technical terms.
-- **Glossaries:** Supports CSV, TSV, TXT, and XLSX. The selected path is remembered and reused for later files.
-- **Target-only mode:** Optionally merges bilingual fields into the target language only. It is off by default.
-- **Cache and cost control:** Reuses identical text across files. The cache is capped at 100 MB and compacted to about 90 MB after removing the oldest entries.
-- **API-key security:** The key is encrypted with Windows DPAPI for the current user and is never written to the repository or reports.
+### Version 1.3.0 highlights
 
-### High-quality PDF engine
+- **Faster startup:** Translation components load only when needed, the application uses a folder-based build, and a lightweight splash gives immediate feedback.
+- **Useful PDF progress:** Parsing, layout analysis, terminology, translation, typesetting, fonts, and save stages are reported with elapsed time and a dynamic ETA.
+- **Open completed results:** Open the translated file or its folder directly from each completed task.
+- **Quality-preserving speed improvements:** Independent batches run concurrently, adaptive rate limiting backs off when required, and completed batches are checkpointed to cache for safe reuse.
+- **Technical-token protection:** Drawing numbers, material IDs, KKS tags, standards, dimensions, units, and URLs are protected before translation.
+- **Unchanged cache limit:** The translation cache remains capped at 100 MB and is compacted to about 90 MB by removing the oldest entries.
 
-Smart PDF layout uses the optional [BabelDOC](https://github.com/funstory-ai/BabelDOC) backend. Select its `babeldoc.exe` under **Settings → Advanced → High-quality engine**. Automatic mode uses smart reflow for prose documents and strict placement for drawings, falling back safely when BabelDOC is unavailable.
+### PDF engine and terminology
 
-The backend, layout models, and fonts currently require roughly 1 GB. They are optional application resources, not part of the 100 MB translation cache. The API key is passed through a per-task temporary configuration, deleted after the task, and redacted from backend errors.
+Smart layout uses [BabelDOC](https://github.com/funstory-ai/BabelDOC) for reports, manuals, and prose-heavy documents. Strict in-place placement remains available for drawings, title blocks, equipment labels, and short text. Windows Setup Full and Portable Full include BabelDOC. Portable Lite falls back safely to strict placement when the engine is unavailable.
 
-### Which download should I choose?
+BabelDOC, its layout models, and fonts are application resources, not part of the 100 MB translation cache. The API key is passed through a per-task temporary configuration, deleted after the task, and redacted from backend errors.
 
-The **Full** archive includes BabelDOC, layout models, and fonts and is ready for smart PDF layout after extracting the complete folder. The smaller **Lite** archive omits BabelDOC and uses strict in-place PDF placement unless you install the engine yourself. Both contain the same application version and support Word, Excel, CSV, and PDF. See [Download Editions](docs/DOWNLOADS.md) for the comparison and manual installation steps.
+User-supplied glossaries can be CSV, TSV, TXT, or XLSX. The selected glossary is remembered and reused for later files. Smart PDF mode can extract terms within the current document, but v1.3.0 **does not automatically build a permanent, reviewable terminology library**. The translation cache is not a terminology database.
 
-### Glossary format
+### Known limitations
 
-Use the first two columns for the source and target terms:
-
-```csv
-lube oil,润滑油
-bearing pedestal,轴承座
-```
-
-Human-approved glossary files are reused across documents. Smart PDF mode also enables BabelDOC's per-document automatic term extraction. A permanent, reviewable auto-built terminology library remains planned; the translation cache is not a terminology database.
+- Scanned pages require OCR; pages without a text layer are left unchanged by default.
+- Dense PDF title blocks or substantially longer translations may require smaller fonts.
+- Text inside DOCX text boxes, SmartArt, and embedded objects is not currently processed.
+- Legacy `.doc` support requires Microsoft Word.
+- Test representative files for terminology and layout before a large batch.
 
 ### Run from source
 
@@ -216,30 +195,14 @@ python -m pip install -r requirements.txt
 python -m translator_app
 ```
 
-CLI example:
-
-```powershell
-$env:DEEPSEEK_API_KEY="your-key"
-python -m translator_app.cli "D:\docs" --target zh --output-dir "D:\translated"
-```
-
-### Known limitations
-
-- Scanned images, outlined PDF text, and pages without a text layer are not translated.
-- Smart PDF mode requires a separate BabelDOC installation and uses more disk space than strict placement.
-- Dense PDF title blocks or long translations may require smaller font sizes.
-- Text inside DOCX text boxes, SmartArt, and embedded objects is not currently processed.
-- Legacy `.doc` support requires Microsoft Word.
-- Validate terminology and layout with a representative sample before processing a large project.
-
 ### Roadmap
 
-- [ ] Reviewable and reusable automatic terminology library
-- [ ] Optional OCR module while keeping scanned pages untouched by default
+- [ ] Reviewable, reusable automatic terminology library
+- [ ] Optional OCR module
 - [ ] Clearer translation quality reports
-- [ ] Windows installer and update notifications
+- [ ] Automatic update notifications
 
-If this project is useful, please consider giving it a **Star**. File-format examples, bug reports, and feature ideas are welcome in [Issues](https://github.com/WANG40929/engineering-document-translator/issues).
+If this project is useful, please consider giving it a **Star**. Bug reports and suggestions are welcome in [Issues](https://github.com/WANG40929/engineering-document-translator/issues).
 
 ---
 

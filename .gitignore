@@ -32,6 +32,9 @@ ui_fix_test_data/
 *_page*.png
 title_fix_test.png
 translation_report_*.json
+.qa-ui/
+.test-data/
+output/
 
 # Local credentials, configuration and cache
 *.key
