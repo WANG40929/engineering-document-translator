@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -12,7 +13,7 @@ os.environ.setdefault("UDT_NO_SPLASH", "1")
 
 try:
     from PySide6.QtGui import QCloseEvent
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QProgressBar
 
     from translator_app.config import AppConfig, ConfigStore
     from translator_app.i18n import I18n, set_language
@@ -156,6 +157,75 @@ class GuiTests(unittest.TestCase):
                 window.table.geometry().top(),
             )
         finally:
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_no_orphan_progress_bar_can_become_a_popup(self):
+        window = self._window("zh-CN")
+        temporary = tempfile.TemporaryDirectory(prefix="udt_gui_")
+        try:
+            source = Path(temporary.name) / "sample.docx"
+            source.touch()
+            window._insert_paths([source])
+            self.assertFalse(
+                any(
+                    isinstance(widget, QProgressBar) and widget.isWindow()
+                    for widget in QApplication.allWidgets()
+                )
+            )
+            self.assertFalse(hasattr(window, "progress"))
+        finally:
+            temporary.cleanup()
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_removing_last_idle_file_restores_ready_state(self):
+        window = self._window("zh-CN")
+        temporary = tempfile.TemporaryDirectory(prefix="udt_gui_")
+        try:
+            source = Path(temporary.name) / "sample.docx"
+            source.touch()
+            window._insert_paths([source])
+            window.status.setText("old task text")
+            window._remove_path(str(source))
+            self.assertEqual(window.table.rowCount(), 0)
+            self.assertEqual(window.status.text(), I18n("zh-CN").t("status.ready"))
+            self.assertFalse(window.start_button.isEnabled())
+        finally:
+            temporary.cleanup()
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_deleting_active_file_stops_without_stale_progress_text(self):
+        window = self._window("zh-CN")
+        temporary = tempfile.TemporaryDirectory(prefix="udt_gui_")
+        try:
+            source = Path(temporary.name) / "sample.docx"
+            source.touch()
+            window._insert_paths([source])
+            window.running = True
+            window.task_started = time.monotonic()
+            window.active_run_paths = [str(source.resolve())]
+            window.progress_timer.start()
+
+            window._remove_path(str(source))
+            stopping = I18n("zh-CN").t("status.stopping")
+            self.assertTrue(window.stop_requested)
+            self.assertFalse(window.progress_timer.isActive())
+            self.assertEqual(window.status.text(), stopping)
+            window._refresh_progress_text()
+            self.assertEqual(window.status.text(), stopping)
+
+            window._on_stopped()
+            self.assertEqual(window.table.rowCount(), 0)
+            self.assertEqual(window.status.text(), I18n("zh-CN").t("status.ready"))
+            self.assertFalse(window.start_button.isEnabled())
+        finally:
+            window.running = False
+            temporary.cleanup()
             window.close()
             window.deleteLater()
             self.app.processEvents()

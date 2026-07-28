@@ -4,8 +4,8 @@
 
 ### 自动化测试
 
-- **结果：58 项全部通过。**
-- 覆盖范围包括 PDF、DOCX、XLSX、CSV、Excel 内嵌图片、缓存清理、配置迁移、密钥保护、占位符修复、截断 JSON 拆分、失败重试、并行批次、限速恢复、PDF 多输出复用、内置引擎优先级、后台进程清理、PDF 阶段进度、界面多语言、最小窗口布局和安装器中文配置。
+- **结果：66 项全部通过。**
+- 覆盖范围包括 PDF、DOCX、Word 合并单元格去重、XLSX、CSV、Excel 内嵌图片、缓存清理、配置迁移、密钥保护、双语占位符计数、截断 JSON 拆分、长段隔离、失败重试、并行批次、限速恢复、PDF 多输出复用、内置引擎优先级、后台进程清理、删除/停止状态、孤立窗口检查、界面多语言、最小窗口布局和安装器中文配置。
 
 ### 真实 PDF 回归
 
@@ -22,10 +22,18 @@
 
 v1.3.0 的核心翻译流程、真实 PDF 进度、版式安全检查和六种界面语言均通过本轮回归验证。
 
+### 真实 Word 箱单回归
+
+- 样本：`Packing_List_Almaty_PS_101_20250604_093541.DOCX`，包含 9 个表格、3 个节、合并单元格及 1767 字符的德英双语出口管制说明。
+- 完成时间：**46.17 秒**；438 个不同文本全部完成，报告为 0 个失败。
+- 合并单元格去重后实际翻译 2946 个段落，避免重复处理同一 XML 段落。
+- 输入和输出均保留 9 个表格、3 个节及 11703 个表格/页眉页脚段落引用。
+- 长说明合并为自然中文，`AL:9X9999` 与 `ECCN: 9X9999` 各保留一次；未发现 `UDT_` 内部占位符泄漏。
+
 ### Windows 成品验证
 
 - 免安装轻量版：67.80 MiB；免安装完整版：506.10 MiB；安装完整版：314.66 MiB。
-- 全新免安装构建显示启动画面约 2.37 秒、主窗口约 2.65 秒；安装版主窗口约 2.31 秒。
+- 本次新构建的轻量版主窗口约 **1.85 秒**出现，桌面完整版约 **2.14 秒**出现；两次自动退出冒烟测试的退出码均为 0。
 - 两个 ZIP 均通过完整 CRC 检查，内部没有非 ASCII 或不安全路径。
 - 完整版与安装版内置 BabelDOC 0.6.4；Excel 图片所需的 Pillow 及许可证已包含。
 - 安装器无参数启动时自动选择简体中文，语言列表完整显示六种语言；欢迎页、按钮和退出提示均通过中文界面检查。
@@ -37,8 +45,8 @@ v1.3.0 的核心翻译流程、真实 PDF 进度、版式安全检查和六种�
 
 ### Automated tests
 
-- **Result: all 58 tests passed.**
-- Coverage includes PDF, DOCX, XLSX, CSV, embedded Excel images, cache cleanup, configuration migration, key protection, placeholder recovery, truncated-JSON splitting, retry behavior, concurrent batches, rate-limit recovery, duplicate multi-output PDFs, bundled-engine precedence, background-process cleanup, PDF stage progress, interface localization, minimum-window layout, and installer localization.
+- **Result: all 66 tests passed.**
+- Coverage includes PDF, DOCX, merged-cell deduplication, XLSX, CSV, embedded Excel images, cache cleanup, configuration migration, key protection, bilingual placeholder counting, truncated-JSON splitting, long-segment isolation, retry behavior, concurrent batches, rate-limit recovery, duplicate multi-output PDFs, bundled-engine precedence, background-process cleanup, delete/stop state handling, orphan-window checks, interface localization, minimum-window layout, and installer localization.
 
 ### Real-PDF regression
 
@@ -55,10 +63,18 @@ v1.3.0 的核心翻译流程、真实 PDF 进度、版式安全检查和六种�
 
 The v1.3.0 core translation flow, real PDF progress, layout-safety checks, and all six interface languages passed this regression cycle.
 
+### Real Word packing-list regression
+
+- Sample: `Packing_List_Almaty_PS_101_20250604_093541.DOCX`, containing nine tables, three sections, merged cells, and a 1,767-character German/English export-control notice.
+- Completion time: **46.17 seconds**; all 438 unique texts completed with zero failed files.
+- The merged-cell pass translated 2,946 real paragraphs without repeatedly processing the same XML paragraph.
+- Input and output both retained nine tables, three sections, and 11,703 table/header/footer paragraph references.
+- The long notice was merged into natural Chinese with one `AL:9X9999` and one `ECCN: 9X9999`; no internal `UDT_` placeholder leaked.
+
 ### Windows artifact verification
 
 - Portable Lite: 67.80 MiB; Portable Full: 506.10 MiB; Setup Full: 314.66 MiB.
-- A fresh portable build showed the splash at about 2.37 seconds and the main window at about 2.65 seconds; the installed main window appeared at about 2.31 seconds.
+- In the fresh build, the Lite main window appeared in about **1.85 seconds** and the desktop Full build in about **2.14 seconds**; both auto-exit smoke tests returned code 0.
 - Both ZIP files passed complete CRC checks and contained no non-ASCII or unsafe paths.
 - Full and Setup include BabelDOC 0.6.4; Pillow and its license are bundled for embedded Excel-image preservation.
 - Without a language argument, Setup automatically selected Simplified Chinese and displayed all six languages; the welcome page, buttons, and exit prompt were verified in Chinese.

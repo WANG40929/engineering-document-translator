@@ -56,6 +56,71 @@ class CoreTests(unittest.TestCase):
         self.assertFalse(is_translatable("KZ5001-MB-010"))
         self.assertTrue(is_translatable("Lube oil pump"))
 
+    def test_standard_protection_does_not_capture_ordinary_en_words(self):
+        protected = protect_text(
+            "Endverwenders Endverwender Endverbleibs end-user end-use "
+            "EN 1092 ISO 4406 9X9999 / 9X9999"
+        )
+        self.assertEqual(protected.values, ["EN 1092", "ISO 4406", "9X9999"])
+        self.assertNotIn("Endverwender", protected.values)
+        self.assertEqual(protected.text.count("__UDT_0002__"), 2)
+        self.assertEqual(
+            protected.restore(protected.text),
+            "Endverwenders Endverwender Endverbleibs end-user end-use "
+            "EN 1092 ISO 4406 9X9999 / 9X9999",
+        )
+
+    def test_mixed_case_engineering_codes_remain_protected(self):
+        protected = protect_text("Use mbv21AA201, AbC-1234 and p12345 as tagged.")
+        self.assertEqual(
+            protected.values,
+            ["mbv21AA201", "AbC-1234", "p12345"],
+        )
+
+    def test_bilingual_placeholder_counts_allow_only_safe_duplicate_collapse(self):
+        translator = DeepSeekTranslator(
+            "test-key",
+            cache=TranslationCache(self.root / "bilingual-placeholders.sqlite3"),
+            pure_target_language=True,
+            quality_review=False,
+        )
+        token = "__UDT_0000__"
+        source = (
+            ("Deutscher Sicherheitstext " * 7)
+            + f"AL {token} ECCN {token} / "
+            + ("English safety statement " * 7)
+            + f"AL {token} ECCN {token}"
+        )
+        self.assertTrue(
+            translator._placeholder_counts_are_valid(source, f"AL {token} ECCN {token}")
+        )
+        self.assertTrue(
+            translator._placeholder_counts_are_valid(source, " ".join([token] * 4))
+        )
+        self.assertFalse(
+            translator._placeholder_counts_are_valid(source, " ".join([token] * 3))
+        )
+        self.assertFalse(translator._placeholder_counts_are_valid(source, token))
+        self.assertFalse(
+            translator._placeholder_counts_are_valid(
+                source,
+                f"{token} {token} __UDT_0001__",
+            )
+        )
+        self.assertFalse(
+            translator._placeholder_counts_are_valid(
+                f"Use {token} and {token} in this single-language instruction",
+                token,
+            )
+        )
+        packing_row = (
+            f"508624, Thread Arc {token}, HIEGB 20 "
+            f"508624, Gewinderohrbogen {token}, HIEGB 20"
+        )
+        self.assertTrue(
+            translator._placeholder_counts_are_valid(packing_row, token)
+        )
+
     def test_api_batch_deduplicates_and_caches(self):
         class MockDeepSeek(DeepSeekTranslator):
             calls = 0
@@ -635,6 +700,35 @@ print('Save PDF 100%')
         self.assertEqual(result.status, "completed")
         self.assertEqual(translator.seen, ["Packliste / Packing List"])
         self.assertEqual(Document(output).paragraphs[0].text, "装箱单")
+
+    def test_docx_translates_a_merged_cell_paragraph_only_once(self):
+        source, output = self.root / "merged.docx", self.root / "merged_ZH.docx"
+        document = Document()
+        table = document.add_table(rows=1, cols=2)
+        merged = table.cell(0, 0).merge(table.cell(0, 1))
+        merged.text = "Shared equipment description"
+        document.save(source)
+
+        class RecordingTranslator:
+            usage = {"offline": True}
+
+            def __init__(inner):
+                inner.seen = []
+
+            def translate_many(inner, texts, progress=None):
+                inner.seen.extend(texts)
+                if progress:
+                    progress(len(texts), len(texts))
+                return ["共享设备说明" for _text in texts]
+
+        translator = RecordingTranslator()
+        result = DocxEngine().translate(source, output, translator, self.options)
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.translated_units, 1)
+        self.assertEqual(translator.seen, ["Shared equipment description"])
+        translated = Document(output)
+        self.assertEqual(translated.tables[0].cell(0, 0).text, "共享设备说明")
+        self.assertEqual(translated.tables[0].cell(0, 1).text, "共享设备说明")
 
     def test_xlsx_preserves_formula(self):
         source, output = self.root / "sample.xlsx", self.root / "sample_ZH.xlsx"

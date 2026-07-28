@@ -139,6 +139,47 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(len(healthy.received), 2)
         self.assertTrue(all("failure marker" in text for text in healthy.received))
 
+    def test_long_segment_isolated_so_short_results_are_checkpointed(self):
+        class LongFailingTranslator(DeepSeekTranslator):
+            def _request(inner, items, review=False):
+                if any(len(item["text"]) > 1200 for item in items):
+                    raise DeepSeekError("simulated long-segment failure")
+                return {
+                    int(item["id"]): f"完成：{item['text']}"
+                    for item in items
+                }
+
+        class HealthyTranslator(DeepSeekTranslator):
+            def __init__(inner, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                inner.received = []
+
+            def _request(inner, items, review=False):
+                inner.received.extend(item["text"] for item in items)
+                return {
+                    int(item["id"]): f"完成：{item['text']}"
+                    for item in items
+                }
+
+        cache = TranslationCache(self.root / "long-isolation.sqlite3")
+        short = [f"ordinary packing-list field {index}" for index in range(27)]
+        long_text = ("long bilingual legal statement " * 55).strip()
+        options = dict(
+            cache=cache,
+            batch_size=40,
+            pure_target_language=False,
+            quality_review=False,
+        )
+        with self.assertRaises(DeepSeekError):
+            LongFailingTranslator("test-key", **options).translate_many(
+                [*short, long_text]
+            )
+
+        healthy = HealthyTranslator("test-key", **options)
+        result = healthy.translate_many([*short, long_text])
+        self.assertEqual(result[-1], f"完成：{long_text}")
+        self.assertEqual(healthy.received, [long_text])
+
     def test_permanent_failure_does_not_launch_the_entire_queue(self):
         class FailingTranslator(DeepSeekTranslator):
             def __init__(inner, *args, **kwargs):

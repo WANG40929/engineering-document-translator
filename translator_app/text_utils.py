@@ -13,17 +13,20 @@ LETTER_RE = re.compile(r"[A-Za-z\u00c0-\u024f\u0400-\u04ff\u4e00-\u9fff\u3040-\u
 ONLY_CODE_RE = re.compile(r"^[\s\d\W_]+$", re.UNICODE)
 PROTECTED_PATTERNS = [
     # URLs, e-mail addresses and explicit placeholders.
-    r"https?://\S+",
+    r"(?i:https?)://\S+",
     r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b",
-    r"__UDT_\d{4}__",
+    r"(?i:__UDT_\d{4}__)",
     # Standards, drawing/KKS identifiers and long mixed codes.
-    r"\b(?:ISO|IEC|DIN|EN|GB|ASTM|ASME|API|IEEE|NFPA|GOST|SNIP|SP|SNiP)[ -]?[A-Z0-9][A-Z0-9./:_-]*\b",
-    r"\b(?=[A-Z0-9&._/-]{5,}\b)(?=[A-Z0-9&._/-]*\d)(?=[A-Z0-9&._/-]*[A-Z])[A-Z0-9&._/-]+\b",
+    # Standard prefixes are deliberately case-sensitive. A global
+    # IGNORECASE made ordinary words such as "Endverwender" and "end-user"
+    # look like EN standard numbers and caused impossible placeholder checks.
+    r"\b(?:ISO|IEC|DIN|EN|GB|ASTM|ASME|API|IEEE|NFPA|GOST|SNIP|SP|SNiP)[ -]?(?=[A-Z0-9./:_-]*\d)[A-Z0-9][A-Z0-9./:_-]*\b",
+    r"(?i:\b(?=[A-Z0-9&._/-]{5,}\b)(?=[A-Z0-9&._/-]*\d)(?=[A-Z0-9&._/-]*[A-Z])[A-Z0-9&._/-]+\b)",
     # Dimensions, temperatures, pressures, electrical values and percentages.
-    r"(?<!\w)[+-]?\d+(?:[.,]\d+)?\s*(?:mm|cm|m|km|kg|g|t|N|kN|Nm|kNm|Pa|kPa|MPa|bar|psi|°C|K|V|kV|A|mA|Hz|kW|MW|rpm|r/min|%)(?!\w)",
-    r"(?<!\w)\d+(?:[.,]\d+)?\s*[x×]\s*\d+(?:[.,]\d+)?(?:\s*[x×]\s*\d+(?:[.,]\d+)?)?(?!\w)",
+    r"(?<!\w)[+-]?\d+(?:[.,]\d+)?\s*(?i:mm|cm|m|km|kg|g|t|N|kN|Nm|kNm|Pa|kPa|MPa|bar|psi|°C|K|V|kV|A|mA|Hz|kW|MW|rpm|r/min|%)(?!\w)",
+    r"(?<!\w)\d+(?:[.,]\d+)?\s*(?i:[x×])\s*\d+(?:[.,]\d+)?(?:\s*(?i:[x×])\s*\d+(?:[.,]\d+)?)?(?!\w)",
 ]
-PROTECTED_RE = re.compile("|".join(f"(?:{p})" for p in PROTECTED_PATTERNS), re.IGNORECASE)
+PROTECTED_RE = re.compile("|".join(f"(?:{p})" for p in PROTECTED_PATTERNS))
 PLACEHOLDER_FLEX_RE = re.compile(
     r"(?<![A-Za-z0-9])(?:_{1,2}\s*)?UDT\s*_?\s*(\d{4})(?:\s*_{1,2})?(?![A-Za-z0-9])",
     re.IGNORECASE,
@@ -79,10 +82,18 @@ def has_internal_placeholder(text: str) -> bool:
 
 def protect_text(text: str) -> ProtectedText:
     values: list[str] = []
+    indexes: dict[str, int] = {}
 
     def replace(match: re.Match) -> str:
-        values.append(match.group(0))
-        return f"__UDT_{len(values) - 1:04d}__"
+        value = match.group(0)
+        index = indexes.get(value)
+        if index is None:
+            index = len(values)
+            indexes[value] = index
+            values.append(value)
+        # Repeated technical values intentionally reuse one token. This lets
+        # bilingual prose collapse while every distinct code remains checked.
+        return f"__UDT_{index:04d}__"
 
     return ProtectedText(PROTECTED_RE.sub(replace, text), values)
 

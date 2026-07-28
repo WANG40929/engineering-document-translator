@@ -6,8 +6,8 @@ import time
 from collections import deque
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QIcon, QPainter, QPen, QPixmap, QPolygon
+from PySide6.QtCore import QEvent, QLineF, QObject, QPoint, QRectF, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QCursor, QDesktopServices, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygon
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame,
@@ -149,32 +149,74 @@ class IconButton(QPushButton):
         super().__init__(parent)
         self.kind = kind
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(38, 38)
+        self.setFixedSize(36, 36)
         self.setObjectName("iconButton")
+        self.setProperty("kind", kind)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.EnabledChange:
+            self.setCursor(
+                Qt.PointingHandCursor if self.isEnabled() else Qt.ArrowCursor
+            )
+            self.update()
+        super().changeEvent(event)
 
     def paintEvent(self, event):
         super().paintEvent(event)
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        color = QColor("#1f67e8" if self.underMouse() else "#637083")
+        if not self.isEnabled():
+            color = QColor("#b7c1cf")
+        elif self.isDown():
+            color = QColor("#1558ce")
+        elif self.underMouse() and self.kind == "trash":
+            color = QColor("#d64545")
+        elif self.underMouse():
+            color = QColor("#1769e8")
+        else:
+            color = QColor("#607087")
         p.setPen(QPen(color, 1.8, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
         p.setBrush(Qt.NoBrush)
+        line = lambda x1, y1, x2, y2: p.drawLine(QLineF(x1, y1, x2, y2))
         if self.kind == "trash":
-            p.drawRoundedRect(13, 13, 12, 16, 2, 2)
-            p.drawLine(11, 11, 27, 11)
-            p.drawLine(16, 8, 22, 8)
-            p.drawLine(17, 16, 17, 25)
-            p.drawLine(21, 16, 21, 25)
+            p.drawRoundedRect(QRectF(12, 13, 12, 15), 2, 2)
+            line(10.5, 10.5, 25.5, 10.5)
+            line(15, 7.5, 21, 7.5)
+            line(16, 16.5, 16, 24.5)
+            line(20, 16.5, 20, 24.5)
         elif self.kind == "open":
-            p.drawRoundedRect(9, 10, 19, 20, 2, 2)
-            p.drawLine(18, 8, 30, 8)
-            p.drawLine(30, 8, 30, 20)
-            p.drawLine(30, 8, 17, 21)
+            document = QPainterPath()
+            document.moveTo(18, 7)
+            document.lineTo(10.5, 7)
+            document.quadTo(8, 7, 8, 9.5)
+            document.lineTo(8, 26.5)
+            document.quadTo(8, 29, 10.5, 29)
+            document.lineTo(17, 29)
+            document.moveTo(18, 7)
+            document.lineTo(23, 12)
+            document.lineTo(23, 16)
+            document.moveTo(18, 7)
+            document.lineTo(18, 12)
+            document.lineTo(23, 12)
+            p.drawPath(document)
+            line(15.5, 22, 28, 22)
+            line(23.5, 17.5, 28, 22)
+            line(23.5, 26.5, 28, 22)
         elif self.kind == "folder":
-            p.drawRoundedRect(7, 12, 24, 17, 3, 3)
-            p.drawLine(8, 12, 15, 12)
-            p.drawLine(15, 12, 18, 9)
-            p.drawLine(18, 9, 25, 9)
+            folder = QPainterPath()
+            folder.moveTo(7.5, 13)
+            folder.lineTo(7.5, 11.5)
+            folder.quadTo(7.5, 9.5, 9.5, 9.5)
+            folder.lineTo(14.5, 9.5)
+            folder.lineTo(17.5, 12.5)
+            folder.lineTo(26.5, 12.5)
+            folder.quadTo(28.5, 12.5, 28.5, 14.5)
+            folder.lineTo(28.5, 25.5)
+            folder.quadTo(28.5, 28, 26, 28)
+            folder.lineTo(10, 28)
+            folder.quadTo(7.5, 28, 7.5, 25.5)
+            folder.closeSubpath()
+            p.drawPath(folder)
 
 
 class OperationCell(QWidget):
@@ -184,7 +226,7 @@ class OperationCell(QWidget):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 0, 2, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(2)
         self.open_button = IconButton("open")
         self.folder_button = IconButton("folder")
         self.remove_button = IconButton("trash")
@@ -675,11 +717,6 @@ class TranslatorWindow(QMainWindow):
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(24, 14, 22, 14)
         footer_layout.setSpacing(14)
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 1000)
-        self.progress.setFormat("")
-        self.progress.setFixedWidth(150)
-        self.progress.hide()
         footer_layout.addWidget(LineGlyph("clock", 26, "#637083"))
         self.status = QLabel(tr("status.ready"))
         self.status.setObjectName("statusText")
@@ -727,8 +764,11 @@ class TranslatorWindow(QMainWindow):
             QPushButton#windowButton, QPushButton#closeButton { border: none; border-radius: 0; background: transparent; font-size: 18px; padding: 0; }
             QPushButton#windowButton:hover { background: #f0f3f7; }
             QPushButton#closeButton:hover { background: #e5484d; color: white; }
-            QPushButton#iconButton { border: none; background: transparent; padding: 0; }
-            QPushButton#iconButton:hover { background: #f1f5fb; }
+            QPushButton#iconButton { border: none; background: transparent; padding: 0; border-radius: 6px; }
+            QPushButton#iconButton:hover:enabled { background: #f1f5fb; }
+            QPushButton#iconButton:pressed:enabled { background: #e5eefd; }
+            QPushButton#iconButton:disabled { border: none; background: transparent; }
+            QPushButton#iconButton[kind="trash"]:hover:enabled { background: #fff2f2; }
             #footer { background: #ffffff; border-top: 1px solid #dce2eb; }
             QPushButton#primary { background: #1f67e8; color: white; border: none; font-weight: 600; border-radius: 5px; font-size: 15px; }
             QPushButton#primary:hover { background: #1558ce; }
@@ -1034,15 +1074,50 @@ class TranslatorWindow(QMainWindow):
             header_item.setText(tr("main.tasks_count", count=count))
         visible_rows = min(max(count, 2), 4)
         self.table.setFixedHeight(68 + visible_rows * 84)
-        self.start_button.setEnabled(not self.running and self.table.rowCount() > 0)
+        startable = any(
+            (self.table.item(row, 2).data(Qt.UserRole) or "pending")
+            not in {"completed", "processing", "translating", "queued"}
+            for row in range(count)
+        )
+        self.start_button.setEnabled(not self.running and startable)
+
+    def _reset_run_state(self):
+        """Return all run-only controls and counters to a consistent state."""
+        self.progress_timer.stop()
+        self.running = False
+        self.stop_requested = False
+        self.active_run_paths.clear()
+        self.task_started = 0.0
+        self.progress_fraction = 0.0
+        self.progress_message = ""
+        self.progress_rate = 0.0
+        self.progress_samples.clear()
+        self.eta_seconds = 0.0
+        self.last_progress_at = 0.0
+        self.progress_sample_time = 0.0
+        self.progress_sample_fraction = 0.0
+        self.stop_button.hide()
+        self.stop_button.setEnabled(True)
+        self.stop_button.setText(tr("main.stop_translation"))
+        self.settings_button.setEnabled(True)
+        self._update_file_count()
+
+    def _show_ready_if_empty(self):
+        if not self.running and self.table.rowCount() == 0:
+            self.status.setText(tr("status.ready"))
 
     def _remove_path(self, value):
         target = str(Path(value).resolve())
+        removing_active = self.running and target in self.active_run_paths
         self.outputs_by_input.pop(target, None)
         for row in range(self.table.rowCount() - 1, -1, -1):
             if str(Path(self.table.item(row, 5).text()).resolve()) == target:
                 self.table.removeRow(row)
         self._update_file_count()
+        if removing_active:
+            self._request_stop()
+        else:
+            self._show_ready_if_empty()
 
     def _existing_outputs(self, input_path: str) -> list[Path]:
         key = str(Path(input_path).resolve())
@@ -1133,9 +1208,23 @@ class TranslatorWindow(QMainWindow):
             self.status.setText(tr("status.files_found", count=len(paths)))
 
     def _remove(self):
-        for row in sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True):
+        rows = sorted(
+            {index.row() for index in self.table.selectedIndexes()},
+            reverse=True,
+        )
+        removing_active = False
+        for row in rows:
+            value = str(Path(self.table.item(row, 5).text()).resolve())
+            removing_active = removing_active or (
+                self.running and value in self.active_run_paths
+            )
+            self.outputs_by_input.pop(value, None)
             self.table.removeRow(row)
         self._update_file_count()
+        if removing_active:
+            self._request_stop()
+        else:
+            self._show_ready_if_empty()
 
     def _retry_selected(self):
         rows = {index.row() for index in self.table.selectedIndexes()}
@@ -1146,8 +1235,14 @@ class TranslatorWindow(QMainWindow):
             self.status.setText(tr("status.rows_requeued", count=len(rows)))
 
     def _clear(self):
+        was_running = self.running
+        if was_running:
+            self._request_stop()
         self.table.setRowCount(0)
+        self.outputs_by_input.clear()
         self._update_file_count()
+        if not was_running:
+            self._show_ready_if_empty()
 
     def _choose_output(self):
         path = QFileDialog.getExistingDirectory(self, tr("dialog.select_output_folder"))
@@ -1205,8 +1300,8 @@ class TranslatorWindow(QMainWindow):
                 self._set_row_status(row, "queued")
                 self._set_row_progress(row, 0, tr("status.waiting"))
         self.stop_requested = False
-        self.running = True; self.start_button.setEnabled(False); self.progress.setValue(0)
-        self.progress.show()
+        self.running = True
+        self.start_button.setEnabled(False)
         self.settings_button.setEnabled(False)
         self.stop_button.setText(tr("main.stop_translation"))
         self.stop_button.setEnabled(True)
@@ -1253,12 +1348,20 @@ class TranslatorWindow(QMainWindow):
             self.bridge.done.emit(results, str(report))
         except TranslationStopped:
             self.bridge.stopped.emit()
-        except Exception as exc: self.bridge.error.emit(str(exc))
+        except Exception as exc:
+            # A provider or document engine may surface its own exception
+            # after the user has already requested cancellation. Treat that
+            # terminal race as a stopped task, not a new translation failure.
+            if self.stop_requested:
+                self.bridge.stopped.emit()
+            else:
+                self.bridge.error.emit(str(exc))
 
     def _request_stop(self):
         if not self.running or self.stop_requested:
             return
         self.stop_requested = True
+        self.progress_timer.stop()
         self.stop_button.setEnabled(False)
         self.stop_button.setText(tr("common.stopping"))
         self.status.setText(tr("status.stopping"))
@@ -1275,6 +1378,8 @@ class TranslatorWindow(QMainWindow):
         return tr("progress.seconds", seconds=seconds)
 
     def _on_progress(self, file_path, fraction, message):
+        if not self.running or self.stop_requested:
+            return
         now = time.monotonic()
         fraction = min(1.0, max(self.progress_fraction, float(fraction)))
         elapsed = now - self.progress_sample_time
@@ -1288,7 +1393,6 @@ class TranslatorWindow(QMainWindow):
             self.last_progress_at = now
         self.progress_fraction = fraction
         self.progress_message = message
-        self.progress.setValue(round(fraction * 1000))
         if file_path:
             target = str(Path(file_path).resolve())
             for row in range(self.table.rowCount()):
@@ -1308,6 +1412,9 @@ class TranslatorWindow(QMainWindow):
 
     def _refresh_progress_text(self):
         if not self.running or not self.task_started:
+            return
+        if self.stop_requested:
+            self.status.setText(tr("status.stopping"))
             return
         elapsed = time.monotonic() - self.task_started
         if (
@@ -1342,11 +1449,7 @@ class TranslatorWindow(QMainWindow):
         )
 
     def _on_done(self, results, report):
-        self.progress_timer.stop()
-        self.running = False; self.start_button.setEnabled(True); self.settings_button.setEnabled(True)
-        self.stop_requested = False
-        self.stop_button.hide()
-        self.progress.hide()
+        self._reset_run_state()
         result_by_path = {str(Path(result.input_path).resolve()): result for result in results}
         for row in range(self.table.rowCount()):
             path = str(Path(self.table.item(row, 5).text()).resolve())
@@ -1362,9 +1465,11 @@ class TranslatorWindow(QMainWindow):
                         [result.output_path, *result.additional_outputs],
                     )
         completed = sum(r.status == "completed" for r in results); failed = sum(r.status == "failed" for r in results)
-        if not failed:
-            self.progress_fraction = 1.0
-            self.progress.setValue(1000)
+        self._update_file_count()
+        if self.table.rowCount() == 0:
+            self.status.setText(tr("status.ready"))
+            self._close_after_worker_cleanup()
+            return
         self.status.setText(
             tr("status.batch_complete", completed=completed, failed=failed, report=report)
         )
@@ -1382,33 +1487,33 @@ class TranslatorWindow(QMainWindow):
         )
 
     def _on_error(self, message):
-        self.progress_timer.stop()
-        self.running = False; self.start_button.setEnabled(True); self.settings_button.setEnabled(True)
-        self.stop_requested = False
-        self.stop_button.hide()
-        self.progress.hide()
+        self._reset_run_state()
         for row in range(self.table.rowCount()):
             status = self.table.item(row, 2).data(Qt.UserRole)
             if status in {"queued", "processing", "translating"}:
                 self._set_row_status(row, "failed")
+        self._update_file_count()
+        if self.table.rowCount() == 0:
+            self.status.setText(tr("status.ready"))
+            self._close_after_worker_cleanup()
+            return
         self.status.setText(tr("status.task_failed"))
         if self._close_after_worker_cleanup():
             return
         QMessageBox.critical(self, tr("dialog.error_title"), message)
 
     def _on_stopped(self):
-        self.progress_timer.stop()
-        self.running = False
-        self.stop_requested = False
-        self.stop_button.hide()
-        self.progress.hide()
-        self.settings_button.setEnabled(True)
+        self._reset_run_state()
         for row in range(self.table.rowCount()):
             status = self.table.item(row, 2).data(Qt.UserRole)
             if status in {"queued", "processing", "translating", "failed"}:
                 self._set_row_status(row, "pending")
         self._update_file_count()
-        self.status.setText(tr("status.stopped"))
+        self.status.setText(
+            tr("status.stopped")
+            if self.table.rowCount()
+            else tr("status.ready")
+        )
         self._close_after_worker_cleanup()
 
 

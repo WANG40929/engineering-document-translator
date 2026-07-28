@@ -37,11 +37,12 @@ LANGUAGE_NAMES = {
     "ko": "한국어",
 }
 
-CACHE_POLICY_VERSION = "v2-paragraph-target-only-review"
+CACHE_POLICY_VERSION = "v4-safe-parallel-placeholders"
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LATIN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z-]{1,}")
 PLACEHOLDER_RE = re.compile(r"__UDT_\d{4}__")
 RETRYABLE_HTTP_CODES = {408, 429, 500, 502, 503, 504}
+LONG_SEGMENT_BATCH_THRESHOLD = 1200
 
 
 class AdaptiveRateLimiter:
@@ -253,6 +254,94 @@ class DeepSeekTranslator:
             + (f"\n必须采用以下术语表：\n{glossary}" if glossary else "")
         )
 
+    def _placeholder_counts_are_valid(self, source: str, translated: str) -> bool:
+        """Keep codes exact while permitting a genuine bilingual merge.
+
+        Target-only mode merges equivalent language halves. A code repeated
+        in both halves should then occur as many times as it did in either one
+        half, rather than as many times as it did in both halves combined.
+        """
+        expected = Counter(placeholder_indexes(source))
+        actual = Counter(placeholder_indexes(translated))
+        if actual == expected:
+            return True
+        if not self.pure_target_language or set(actual) != set(expected):
+            return False
+
+        branch_split = None
+
+        # Packing lists commonly repeat the same material number before the
+        # English and German descriptions. The second occurrence is a strong,
+        # format-derived bilingual boundary even when no slash is present.
+        leading_id = re.match(r"^\s*(\d{5,}(?:\.\d+)?)\s*[,;:]?", source)
+        if leading_id:
+            remainder_start = leading_id.end()
+            repeated_id = re.search(
+                rf"(?<!\w){re.escape(leading_id.group(1))}(?=\s*[,;:])",
+                source[remainder_start:],
+            )
+            if repeated_id:
+                candidate = remainder_start + repeated_id.start()
+                if candidate >= 12 and len(source) - candidate >= 12:
+                    branch_split = candidate
+
+        # Long legal notes often use a central slash between complete language
+        # versions. Internal slashes near either edge are not treated as the
+        # language boundary.
+        separators = [
+            match
+            for match in re.finditer(r"\s+/\s+", source)
+            if match.start() >= 120 and len(source) - match.end() >= 120
+        ]
+        if branch_split is None and separators:
+            separator = min(
+                separators,
+                key=lambda match: abs(match.start() - len(source) / 2),
+            )
+            branch_split = separator.start()
+
+        # A small number of rows omit both the repeated material number and a
+        # slash. Only accept an inferred boundary when the text itself contains
+        # clear English/German parallel markers and a repeated protected value.
+        english_marker = re.search(
+            r"\b(?:the|and|with|without|for|from|to|of|or|according|length)\b",
+            source,
+            re.IGNORECASE,
+        )
+        german_marker = re.search(
+            r"\b(?:der|die|das|und|mit|ohne|nach|von|für|auf|aus|oder|nicht|zum|zur|länge)\b",
+            source,
+            re.IGNORECASE,
+        )
+        if branch_split is None and english_marker and german_marker:
+            positions_by_index: dict[int, list[re.Match]] = {}
+            for match in PLACEHOLDER_RE.finditer(source):
+                positions_by_index.setdefault(
+                    int(match.group(0)[6:10]),
+                    [],
+                ).append(match)
+            candidates = []
+            for positions in positions_by_index.values():
+                if len(positions) >= 2 and len(positions) % 2 == 0:
+                    half = len(positions) // 2
+                    candidates.append(
+                        (positions[half - 1].end() + positions[half].start()) // 2
+                    )
+            if candidates:
+                candidate = min(
+                    candidates,
+                    key=lambda value: abs(value - len(source) / 2),
+                )
+                if candidate >= 12 and len(source) - candidate >= 12:
+                    branch_split = candidate
+
+        if branch_split is None:
+            return False
+        left = Counter(placeholder_indexes(source[:branch_split]))
+        right = Counter(placeholder_indexes(source[branch_split:]))
+        merged = left | right
+        return bool(set(left) & set(right)) and actual == merged
+
     def _request(self, items: list[dict], review: bool = False) -> dict[int, str]:
         system_prompt = self._system_prompt()
         if review:
@@ -328,14 +417,13 @@ class DeepSeekTranslator:
                     # caller will preserve valid items and repair only missing
                     # IDs, splitting the batch when necessary.
                     raise IncompleteResponseError(missing, result, finish_reason)
-                expected_by_id = {
-                    int(item["id"]): Counter(placeholder_indexes(str(item.get("text", ""))))
-                    for item in items
-                }
                 invalid = {
-                    item_id
-                    for item_id, expected in expected_by_id.items()
-                    if Counter(placeholder_indexes(result.get(item_id, ""))) != expected
+                    int(item["id"])
+                    for item in items
+                    if not self._placeholder_counts_are_valid(
+                        str(item.get("text", "")),
+                        result.get(int(item["id"]), ""),
+                    )
                 }
                 if invalid:
                     self._bump_usage("schema_failures")
@@ -440,10 +528,24 @@ class DeepSeekTranslator:
         on_completed: Callable[[list[tuple[str, str]]], None] | None = None,
     ) -> list[tuple[str, str]]:
         """Translate independent batches concurrently and checkpoint each success."""
-        batches = [
-            list(texts[start : start + self.batch_size])
-            for start in range(0, len(texts), self.batch_size)
-        ]
+        batches: list[list[str]] = []
+        current: list[str] = []
+        for text in texts:
+            # A long legal note should not make dozens of short, already valid
+            # segments wait for its repair path. Isolating it preserves context
+            # inside the paragraph and lets every other batch checkpoint.
+            if len(text) > LONG_SEGMENT_BATCH_THRESHOLD:
+                if current:
+                    batches.append(current)
+                    current = []
+                batches.append([text])
+                continue
+            current.append(text)
+            if len(current) >= self.batch_size:
+                batches.append(current)
+                current = []
+        if current:
+            batches.append(current)
         if not batches:
             return []
 

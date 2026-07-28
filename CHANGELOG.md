@@ -21,6 +21,10 @@ This project follows semantic versioning. Stable builds are available from [GitH
 - 保持 100 MB 译文缓存上限不变，超限后仍按时间清理最旧记录。
 - 修正多语言输出文件识别，避免已翻译文件被再次加入任务。
 - Windows 安装程序现已内置简体中文语言包，并在每次启动时按 Windows 界面语言自动选择，避免旧安装程序记住非中文选项。
+- 修复纯目标语言合并德英双语段落时重复技术编号被误判为缺失的问题，并避免把 `Endverwender`、`end-user` 等普通词误识别为 EN 标准号。
+- Word 合并单元格现在只处理一次真实段落；大型箱单显著减少重复遍历，同时保留表格结构。
+- 删除最后一个任务后底部状态恢复为“就绪”；停止时不再被旧进度覆盖，也不再弹出孤立的小进度窗。
+- 重新绘制“打开文件”“打开文件夹”和“删除”线条图标，并补齐禁用、悬停和按下状态。
 
 ### English
 
@@ -37,6 +41,10 @@ This project follows semantic versioning. Stable builds are available from [GitH
 - Closing during a task now waits for background-engine cleanup; minimum-window overlap and multilingual clipping were fixed.
 - Kept the translation cache limit at 100 MB with age-based cleanup of the oldest entries.
 - Improved recognition of translated filenames in all supported languages to prevent accidental reprocessing.
+- Fixed false missing-code failures when target-only translation merges parallel German/English text, and stopped ordinary words such as `Endverwender` and `end-user` from being mistaken for EN standard numbers.
+- Processed each real Word paragraph only once across merged cells, reducing duplicate work in large packing lists while preserving table structure.
+- Restored the footer to **Ready** after the last task is removed, prevented stale progress from overwriting **Stopping**, and removed the orphan progress popup.
+- Redrew the **Open file**, **Open folder**, and **Remove** line icons with proper disabled, hover, and pressed states.
 
 ## 1.2.0
 
