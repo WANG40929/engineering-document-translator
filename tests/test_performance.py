@@ -1,4 +1,4 @@
-"""Performance-safety tests for v1.3.0.
+"""Performance-safety tests for v1.4.0.
 
 The timing test uses a deterministic local fake API.  It is a regression
 benchmark, not a claim about Internet speed: six 40 ms batches take about

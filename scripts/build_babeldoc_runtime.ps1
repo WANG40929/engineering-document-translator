@@ -127,6 +127,18 @@ if ((Test-Path -LiteralPath $sourcePortablePython -PathType Leaf) -and
     if ($LASTEXITCODE -ne 0) { throw "Unable to build the portable BabelDOC launcher." }
     Copy-Item -LiteralPath (Join-Path $launcherDist "babeldoc.exe") `
         -Destination (Join-Path $destinationRoot "babeldoc.exe")
+    foreach ($temporaryLauncherPath in @($launcherDist, $launcherWork, $launcherSpec)) {
+        $resolvedTemporaryPath = [IO.Path]::GetFullPath($temporaryLauncherPath)
+        $resolvedDestinationParent = [IO.Path]::GetFullPath($destinationParent).TrimEnd("\")
+        if (-not $resolvedTemporaryPath.StartsWith(
+                $resolvedDestinationParent + [IO.Path]::DirectorySeparatorChar
+            )) {
+            throw "Refusing to remove an unexpected launcher build path: $resolvedTemporaryPath"
+        }
+        if (Test-Path -LiteralPath $resolvedTemporaryPath) {
+            Remove-Item -LiteralPath $resolvedTemporaryPath -Recurse -Force
+        }
+    }
 } else {
     throw @"
 Unsupported BabelDOC source layout: $sourceRoot
@@ -142,17 +154,24 @@ Provide either:
 $assetTarget = Join-Path $destinationRuntime ".cache\babeldoc"
 New-Item -ItemType Directory -Path $assetTarget -Force | Out-Null
 $cacheRoot = Resolve-PathFromProject $BabelDocCache
-if (Test-Path -LiteralPath $cacheRoot -PathType Container) {
-    foreach ($folder in @("cmap", "fonts", "models", "tiktoken")) {
-        $from = Join-Path $cacheRoot $folder
-        if (Test-Path -LiteralPath $from -PathType Container) {
-            $to = Join-Path $assetTarget $folder
-            if (Test-Path -LiteralPath $to) {
-                # The destination is always inside the newly created package.
-                Remove-Item -LiteralPath $to -Recurse -Force
-            }
-            Copy-Item -LiteralPath $from -Destination $to -Recurse
-        }
+Write-Host "Copying BabelDOC immutable assets from: $cacheRoot"
+if (-not (Test-Path -LiteralPath $cacheRoot -PathType Container)) {
+    throw "BabelDOC asset cache does not exist: $cacheRoot"
+}
+foreach ($folder in @("cmap", "fonts", "models", "tiktoken")) {
+    $from = Join-Path $cacheRoot $folder
+    if (-not (Test-Path -LiteralPath $from -PathType Container)) {
+        throw "BabelDOC asset source folder is missing: $from"
+    }
+    $to = Join-Path $assetTarget $folder
+    if (Test-Path -LiteralPath $to) {
+        # The destination is always inside the newly created package.
+        Remove-Item -LiteralPath $to -Recurse -Force
+    }
+    Copy-Item -LiteralPath $from -Destination $to -Recurse
+    if (-not (Get-ChildItem -LiteralPath $to -Recurse -File -ErrorAction SilentlyContinue |
+            Select-Object -First 1)) {
+        throw "BabelDOC asset folder is empty after copying: $folder"
     }
 }
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import time
 from pathlib import Path
 
@@ -11,6 +12,17 @@ from ..i18n import tr
 from ..models import FileResult, ProgressCallback, TranslationOptions
 from ..text_utils import is_translatable, normalize_text
 from .base import TranslationEngine
+
+
+GENERATED_BULLET_RE = re.compile(
+    r"^\s*(?:[\uf000-\uf8ff\u2022\u25aa\u25cf\u25c6\u25cb\u25a1\u25a0\u2666]|-\s+)\s*"
+)
+PRIVATE_USE_RE = re.compile(r"[\uf000-\uf8ff]")
+SECTION_NUMBER_JOIN_RE = re.compile(r"^(\d+(?:\.\d+)+)(?=[^\d\s.])")
+LEADING_LATIN_FRAGMENT_RE = re.compile(
+    r"^([A-Za-z]{1,3})\s*(?=[\u3400-\u9fff])"
+)
+SOURCE_LATIN_WORD_RE = re.compile(r"^[A-Za-z]+")
 
 
 def _rotation(direction) -> int:
@@ -144,6 +156,28 @@ class PdfEngine(TranslationEngine):
             candidate_size = max(floor, candidate_size * 0.94)
         return False, candidate_size
 
+    @staticmethod
+    def _clean_translation(line: dict, translated: str) -> str:
+        text = str(translated).strip().replace("\u2011", "-")
+        # Private-use glyphs in source PDFs are normally symbol-font bullets.
+        # They must never leak into a Unicode translation font as empty boxes.
+        text = PRIVATE_USE_RE.sub("", text)
+        if line.get("strip_generated_bullet"):
+            text = GENERATED_BULLET_RE.sub("", text, count=1)
+        fragment = LEADING_LATIN_FRAGMENT_RE.match(text)
+        source_word = SOURCE_LATIN_WORD_RE.match(str(line.get("text", "")))
+        if fragment and source_word:
+            value = fragment.group(1)
+            if (
+                source_word.group(0).casefold().startswith(value.casefold())
+                and (len(value) == 1 or not value.isupper())
+            ):
+                text = text[len(value) :].lstrip()
+        # Models occasionally join a protected section number directly to the
+        # translated heading. Restore the visible separator deterministically.
+        text = SECTION_NUMBER_JOIN_RE.sub(r"\1 ", text, count=1)
+        return text.strip()
+
     def _apply_page_translations(
         self,
         page,
@@ -154,9 +188,14 @@ class PdfEngine(TranslationEngine):
         result: FileResult,
     ) -> None:
         for line in lines:
-            page.add_redact_annot(line["rect"], fill=False, cross_out=False)
+            page.add_redact_annot(
+                line.get("redact_rect", line["rect"]),
+                fill=False,
+                cross_out=False,
+            )
         page.apply_redactions(images=0, graphics=0, text=0)
         for line, translated in zip(lines, translations):
+            translated = self._clean_translation(line, translated)
             inserted, used_size = self._insert_fitted(
                 page,
                 line,
