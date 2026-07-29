@@ -2,7 +2,7 @@
 ; This file is compiled by scripts\build_release.ps1 with /D values.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.3.0"
+  #define MyAppVersion "1.4.0"
 #endif
 #ifndef SourceDir
   #error SourceDir must point to the verified Portable Full staging directory.
@@ -11,7 +11,7 @@
   #define ReleaseDir "..\release"
 #endif
 #ifndef OutputBaseName
-  #define OutputBaseName "DocumentTranslator-v1.3.0-Windows-Setup-Full"
+  #define OutputBaseName "DocumentTranslator-v1.4.0-Windows-Setup-Full"
 #endif
 
 #define MyAppName "Document Translator"
@@ -79,6 +79,19 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; A same-AppId upgrade keeps the user's previous install location, but replaces
+; every version-managed directory as a unit.  This prevents removed Python
+; modules or BabelDOC runtime files from an older release being loaded by the
+; new executable.  User settings, API credentials, terminology data and the
+; translation cache live under LocalAppData\UniversalDocumentTranslator and
+; are deliberately outside these targets.
+Type: filesandordirs; Name: "{app}\ApplicationFiles"
+Type: filesandordirs; Name: "{app}\TranslationEngine"
+Type: filesandordirs; Name: "{app}\Legal"
+Type: files; Name: "{app}\ReadMe.html"
+Type: files; Name: "{app}\ReadMe.txt"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"

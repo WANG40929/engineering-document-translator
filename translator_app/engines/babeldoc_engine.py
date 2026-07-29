@@ -17,6 +17,8 @@ import fitz
 
 from ..i18n import tr
 from ..models import FileResult, TranslationOptions
+from ..pdf_quality import analyze_pdf_quality
+from .adaptive_pdf_engine import rebuild_dual_pages, repair_pdf_pages
 from .base import TranslationEngine
 
 
@@ -414,9 +416,29 @@ class BabelDocEngine(TranslationEngine):
                 return candidate
             number += 1
 
+    @staticmethod
+    def _compact_page_numbers(page_numbers: list[int]) -> str:
+        if not page_numbers:
+            return ""
+        ranges: list[str] = []
+        start = previous = page_numbers[0]
+        for page in page_numbers[1:]:
+            if page == previous + 1:
+                previous = page
+                continue
+            ranges.append(
+                str(start) if start == previous else f"{start}-{previous}"
+            )
+            start = previous = page
+        ranges.append(
+            str(start) if start == previous else f"{start}-{previous}"
+        )
+        return ", ".join(ranges)
+
     def translate(self, source, destination, translator, options, progress=None) -> FileResult:
         started = time.monotonic()
         result = FileResult(str(source), str(destination), engine="BabelDOC smart layout")
+        quality_usage: dict = {}
         executable = self.resolve_command(options.babeldoc_path)
         if executable is None:
             result.status = "failed"
@@ -425,6 +447,12 @@ class BabelDocEngine(TranslationEngine):
 
         process = None
         output_tail: list[str] = []
+
+        def emit_smart(fraction: float, message: str) -> None:
+            if progress:
+                mapped = 0.01 + 0.77 * min(1.0, max(0.0, fraction))
+                progress(str(source), mapped, message)
+
         try:
             with tempfile.TemporaryDirectory(prefix="udt_babeldoc_") as temp_value:
                 temp_dir = Path(temp_value)
@@ -446,8 +474,8 @@ class BabelDocEngine(TranslationEngine):
                 ]
                 if options.pdf_output == "mono":
                     command.append("--no-dual")
-                elif options.pdf_output == "dual":
-                    command.append("--no-mono")
+                # Dual-only jobs still need an internal mono file for visual
+                # postflight checks and selective page repair.
                 if options.force_refresh:
                     command.append("--ignore-cache")
                 glossary = getattr(translator, "glossary", {})
@@ -498,20 +526,14 @@ class BabelDocEngine(TranslationEngine):
                 last_emit_time = last_heartbeat
                 last_emitted_fraction = last_fraction
                 last_emitted_message = progress_state.message
-                if progress:
-                    progress(
-                        str(source),
-                        last_fraction,
-                        tr("progress.pdf_start_engine"),
-                    )
+                emit_smart(last_fraction, tr("progress.pdf_start_engine"))
                 reader_done = False
                 while not reader_done or process.poll() is None:
                     try:
                         line = lines.get(timeout=0.5)
                     except queue.Empty:
                         if progress and time.monotonic() - last_heartbeat >= 3:
-                            progress(
-                                str(source),
+                            emit_smart(
                                 progress_state.fraction,
                                 progress_state.heartbeat_message(),
                             )
@@ -531,7 +553,7 @@ class BabelDocEngine(TranslationEngine):
                         or stage_message != last_emitted_message
                     )
                     if progress and changed and now - last_emit_time >= 0.25:
-                        progress(str(source), last_fraction, stage_message)
+                        emit_smart(last_fraction, stage_message)
                         last_emit_time = now
                         last_heartbeat = now
                         last_emitted_fraction = last_fraction
@@ -552,6 +574,151 @@ class BabelDocEngine(TranslationEngine):
                 mono = self._select_generated(output_dir, "mono")
                 dual = self._select_generated(output_dir, "dual")
                 requested = options.pdf_output
+                if mono is None:
+                    raise RuntimeError(tr("error.babeldoc_no_output"))
+
+                quality_report = None
+                try:
+                    quality_report = analyze_pdf_quality(
+                        Path(source),
+                        mono,
+                        lambda current, total: progress(
+                            str(source),
+                            0.78 + 0.08 * (current / max(total, 1)),
+                            tr(
+                                "progress.pdf_quality_scan",
+                                current=current,
+                                total=total,
+                            ),
+                        )
+                        if progress
+                        else None,
+                    )
+                    quality_usage = quality_report.to_dict()
+                except Exception as quality_error:
+                    result.warnings.append(
+                        tr(
+                            "warning.pdf_quality_scan_failed",
+                            reason=quality_error,
+                        )
+                    )
+
+                repaired_pages: list[int] = []
+                if (
+                    quality_report is not None
+                    and quality_report.repair_pages
+                    and hasattr(translator, "translate_many")
+                ):
+                    candidates = quality_report.repair_pages
+
+                    def repair_progress(
+                        _file: str,
+                        fraction: float,
+                        _message: str,
+                    ) -> None:
+                        if not progress:
+                            return
+                        completed = min(
+                            len(candidates),
+                            max(1, round(fraction * len(candidates))),
+                        )
+                        progress(
+                            str(source),
+                            0.86 + 0.12 * min(1.0, max(0.0, fraction)),
+                            tr(
+                                "progress.pdf_quality_repair",
+                                current=completed,
+                                total=len(candidates),
+                            ),
+                        )
+
+                    repair_result = repair_pdf_pages(
+                        Path(source),
+                        mono,
+                        candidates,
+                        translator,
+                        options,
+                        repair_progress,
+                    )
+                    quality_usage["repair"] = {
+                        "status": repair_result.status,
+                        "translated_units": repair_result.translated_units,
+                        "warnings": list(repair_result.warnings),
+                        "errors": list(repair_result.errors),
+                        "elapsed_seconds": repair_result.elapsed_seconds,
+                    }
+                    if repair_result.status == "completed":
+                        repaired_pages = candidates
+                        result.engine = (
+                            "BabelDOC smart layout + adaptive page repair"
+                        )
+                        result.warnings.append(
+                            tr(
+                                "warning.pdf_quality_repaired",
+                                count=len(repaired_pages),
+                                pages=self._compact_page_numbers(repaired_pages),
+                            )
+                        )
+                        try:
+                            verification_report = analyze_pdf_quality(
+                                Path(source),
+                                mono,
+                                lambda current, total: progress(
+                                    str(source),
+                                    0.98
+                                    + 0.008 * (current / max(total, 1)),
+                                    tr(
+                                        "progress.pdf_quality_verify",
+                                        current=current,
+                                        total=total,
+                                    ),
+                                )
+                                if progress
+                                else None,
+                            )
+                            quality_usage["verification"] = (
+                                verification_report.to_dict()
+                            )
+                            if verification_report.repair_pages:
+                                result.warnings.append(
+                                    tr(
+                                        "warning.pdf_quality_residual",
+                                        count=len(
+                                            verification_report.repair_pages
+                                        ),
+                                        pages=self._compact_page_numbers(
+                                            verification_report.repair_pages
+                                        ),
+                                    )
+                                )
+                        except Exception as verification_error:
+                            quality_usage["verification"] = {
+                                "status": "failed",
+                                "error": str(verification_error),
+                            }
+                        if dual is not None:
+                            if progress:
+                                progress(
+                                    str(source),
+                                    0.99,
+                                    tr("progress.pdf_quality_rebuild_dual"),
+                                )
+                            rebuild_dual_pages(
+                                dual,
+                                Path(source),
+                                mono,
+                                repaired_pages,
+                            )
+                    else:
+                        result.warnings.append(
+                            tr(
+                                "warning.pdf_quality_repair_failed",
+                                reason="; ".join(repair_result.errors)
+                                or "unknown error",
+                            )
+                        )
+                quality_usage["repaired_pages"] = repaired_pages
+
                 primary = dual if requested == "dual" else mono
                 if primary is None:
                     raise RuntimeError(tr("error.babeldoc_no_output"))
@@ -589,4 +756,6 @@ class BabelDocEngine(TranslationEngine):
         finally:
             result.elapsed_seconds = round(time.monotonic() - started, 2)
             result.usage = dict(getattr(translator, "usage", {}))
+            if quality_usage:
+                result.usage["pdf_quality"] = quality_usage
         return result

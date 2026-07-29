@@ -2,7 +2,7 @@
 
 ## 中文
 
-v1.3.0 提供三种 Windows 交付方式。三者使用相同的主程序和翻译质量设置。
+v1.4.0 提供三种 Windows 交付方式。三者使用相同的主程序和翻译质量设置。
 
 | 版本 | 包含内容 | 推荐用途 | 使用方式 |
 |---|---|---|---|
@@ -55,7 +55,7 @@ py -3.12 -m venv "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env"
 
 ## English
 
-Version 1.3.0 provides three Windows delivery options. All three use the same main application and translation-quality settings.
+Version 1.4.0 provides three Windows delivery options. All three use the same main application and translation-quality settings.
 
 | Edition | Included | Recommended for | Usage |
 |---|---|---|---|

@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.3.0",
+    [string]$Version = "1.4.0",
     [string]$BabelDocSource = "",
     [string]$BabelDocCache = "$env:USERPROFILE\.cache\babeldoc",
     [string]$Python = "python",
@@ -23,7 +23,27 @@ $applicationRoot = Join-Path $projectRoot "dist\DocumentTranslator"
 $applicationExe = Join-Path $applicationRoot "DocumentTranslator.exe"
 
 if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$') {
-    throw "Version must be an ASCII semantic version, for example 1.3.0."
+    throw "Version must be an ASCII semantic version, for example 1.4.0."
+}
+
+function Assert-InstallerUpgradeContract {
+    $installerDefinition = Get-Content -LiteralPath `
+        (Join-Path $projectRoot "installer\DocumentTranslator.iss") -Raw
+    $requiredSettings = @(
+        'AppId={{57E46738-9460-4DE4-B3E8-65E00A68BAED}',
+        'DefaultDirName={localappdata}\Programs\DocumentTranslator',
+        'UsePreviousAppDir=yes',
+        'CloseApplications=yes',
+        'CloseApplicationsFilter={#MyAppExeName}',
+        'Type: filesandordirs; Name: "{app}\ApplicationFiles"',
+        'Type: filesandordirs; Name: "{app}\TranslationEngine"'
+    )
+    foreach ($setting in $requiredSettings) {
+        if (-not $installerDefinition.Contains($setting)) {
+            throw "Installer upgrade contract is missing: $setting"
+        }
+    }
+    Write-Host "Verified installer upgrade contract (stable AppId and in-place replacement)."
 }
 
 function Remove-SafeReleaseItem {
@@ -189,6 +209,7 @@ function Resolve-BabelDocSource {
 }
 
 $script:BabelDocPinnedVersion = "0.6.4"
+Assert-InstallerUpgradeContract
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 Remove-SafeReleaseItem $stagingRoot -Recurse
 New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null

@@ -191,7 +191,13 @@ class CoreTests(unittest.TestCase):
                 content = json.dumps(
                     {
                         "translations": [
-                            {"id": item["id"], "text": f"译文{item['id']}"}
+                            {
+                                "id": item["id"],
+                                "text": (
+                                    f"[[UDT_SEGMENT_{int(item['id']):04d}]] "
+                                    f"译文{item['id']}"
+                                ),
+                            }
                         ]
                     },
                     ensure_ascii=False,
@@ -234,7 +240,7 @@ class CoreTests(unittest.TestCase):
                 return json.dumps({
                     "choices": [{
                         "finish_reason": "stop",
-                        "message": {"content": '{"translations":[{"id":0,"text":"译文"}]}'},
+                        "message": {"content": '{"translations":[{"id":0,"text":"[[UDT_SEGMENT_0000]] 译文"}]}'},
                     }],
                     "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
                 }).encode("utf-8")
@@ -265,11 +271,67 @@ class CoreTests(unittest.TestCase):
             cache=TranslationCache(self.root / "placeholder-response.sqlite3"),
             quality_review=False,
         )
-        responses = [FakeResponse("安全 UDT_0000"), FakeResponse("安全要求")]
+        responses = [
+            FakeResponse("[[UDT_SEGMENT_0000]] 安全 UDT_0000"),
+            FakeResponse("[[UDT_SEGMENT_0000]] 安全要求"),
+        ]
         with patch("translator_app.deepseek.urllib.request.urlopen", side_effect=responses) as mocked:
             self.assertEqual(translator.translate_many(["Safety requirements"]), ["安全要求"])
         self.assertEqual(mocked.call_count, 2)
         self.assertEqual(translator.usage["schema_failures"], 1)
+
+    def test_api_rejects_swapped_segment_identity_markers(self):
+        class FakeResponse:
+            def __enter__(self): return self
+            def __exit__(self, *_args): return False
+            def read(self):
+                content = {
+                    "translations": [
+                        {
+                            "id": 0,
+                            "text": "[[UDT_SEGMENT_0001]] 第二段译文",
+                        },
+                        {
+                            "id": 1,
+                            "text": "[[UDT_SEGMENT_0000]] 第一段译文",
+                        },
+                    ]
+                }
+                return json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "finish_reason": "stop",
+                                "message": {
+                                    "content": json.dumps(
+                                        content,
+                                        ensure_ascii=False,
+                                    )
+                                },
+                            }
+                        ],
+                        "usage": {},
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8")
+
+        translator = DeepSeekTranslator(
+            "test-key",
+            cache=TranslationCache(self.root / "segment-markers.sqlite3"),
+            quality_review=False,
+        )
+        items = [
+            {"id": 0, "text": "First"},
+            {"id": 1, "text": "Second"},
+        ]
+        with patch(
+            "translator_app.deepseek.urllib.request.urlopen",
+            return_value=FakeResponse(),
+        ):
+            with self.assertRaises(IncompleteResponseError) as raised:
+                translator._request(items)
+        self.assertEqual(raised.exception.missing, {0, 1})
+        self.assertEqual(raised.exception.partial, {})
 
     def test_polluted_cache_is_repaired_or_selectively_refreshed(self):
         class RepairingDeepSeek(DeepSeekTranslator):

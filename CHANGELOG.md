@@ -4,6 +4,30 @@
 
 This project follows semantic versioning. Stable builds are available from [GitHub Releases](https://github.com/WANG40929/engineering-document-translator/releases).
 
+## 1.4.0
+
+### 中文
+
+- 智能 PDF 生成后新增逐页排版质检，自动识别文字隐藏或裁切、内容纵向塌缩、段落异常合并和低于 5.5 pt 的不可读字号。
+- 命中问题时只重新翻译并替换相应页面，不重复处理已经通过检查的页面。
+- 新增自适应 PDF 修复引擎：正文自然换行可合并处理，表格、固定区域、项目符号、页眉和技术编号保持独立。
+- 修复任务按页隔离翻译上下文，避免大型文档跨页映射污染；清理由模型生成的重复项目符号、私用区字符和残留源文首字母。
+- 为每个接口段落增加不会写入成品的身份标记校验，拒绝串段、重复编号和意外编号；为避免复用旧的潜在污染结果，v1.4.0 使用新的缓存策略。
+- 纯译文与双语对照 PDF 会同步重建修复页，同时保持页数、页面尺寸和其他页面不变。
+- 修复完成后执行第二次质量复检，并在任务报告中记录初检、修复和复检结果；页码列表改为紧凑区间显示。
+- 新增真实 294 页工程手册回归，覆盖目录挤压、警告文本裁切、项目符号塌缩、说明框错位和表格小字号等问题。
+
+### English
+
+- Added a post-generation page-by-page quality scan for smart PDFs, detecting hidden or clipped text, vertical collapse, merged blocks, and fonts below the 5.5 pt readability floor.
+- Retranslates and replaces only flagged pages, leaving pages that passed untouched.
+- Added an adaptive PDF repair engine that groups natural prose wrapping while keeping tables, fixed regions, bullets, headers, and technical identifiers separate.
+- Isolated repair translation by page to prevent cross-page mapping contamination in large documents, and removed generated bullets, private-use glyphs, and stray source initials.
+- Added per-segment identity-marker validation to reject swapped, duplicate, and unexpected IDs; v1.4.0 uses a new cache policy so potentially polluted older mappings are not reused.
+- Rebuilds repaired pages consistently in translated-only and bilingual PDFs while preserving page count, page size, and unaffected pages.
+- Runs a second verification scan after repair and records initial scan, repair, and verification results in the task report; page lists are shown as compact ranges.
+- Added a real 294-page engineering-manual regression covering contents-page crowding, clipped warning text, collapsed bullets, notice-box displacement, and unreadably small table text.
+
 ## 1.3.0
 
 ### 中文

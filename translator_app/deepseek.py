@@ -37,10 +37,11 @@ LANGUAGE_NAMES = {
     "ko": "한국어",
 }
 
-CACHE_POLICY_VERSION = "v4-safe-parallel-placeholders"
+CACHE_POLICY_VERSION = "v5-segment-identity"
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LATIN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z-]{1,}")
 PLACEHOLDER_RE = re.compile(r"__UDT_\d{4}__")
+SEGMENT_MARKER_RE = re.compile(r"\[\[UDT_SEGMENT_(\d{4})\]\]")
 RETRYABLE_HTTP_CODES = {408, 429, 500, 502, 503, 504}
 LONG_SEGMENT_BATCH_THRESHOLD = 1200
 
@@ -250,6 +251,8 @@ class DeepSeekTranslator:
             f"{target_only}"
             "物料名称、标题、字段标签和普通技术词必须翻译；注册公司名、地址、型号、图号、物料号、标准号、材料牌号、单位及短缩写保持原样。"
             "不得翻译或改写 __UDT_0000__ 形式的占位符；不解释、不补充。"
+            "每段开头的 [[UDT_SEGMENT_0000]] 是段落身份标记，必须原样保留在该段译文开头，"
+            "不得删除、改写、交换或复制到其他 id。"
             "返回严格 JSON：{\"translations\":[{\"id\":0,\"text\":\"...\"}]}，id 必须与输入一致。"
             + (f"\n必须采用以下术语表：\n{glossary}" if glossary else "")
         )
@@ -349,11 +352,27 @@ class DeepSeekTranslator:
                 "\n这是质量复核：上次结果可能残留了源语言。重新翻译每一段，确保普通词、物料名称和双语字段完全转换为目标语言，"
                 "同时仍须保留代码、单位、型号、公司名和地址。"
             )
+        wire_items = [
+            {
+                **item,
+                "text": (
+                    f"[[UDT_SEGMENT_{int(item['id']):04d}]] "
+                    f"{item.get('text', '')}"
+                ),
+            }
+            for item in items
+        ]
         body = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps({"segments": items}, ensure_ascii=False)},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"segments": wire_items},
+                        ensure_ascii=False,
+                    ),
+                },
             ],
             "temperature": 0.1,
             "response_format": {"type": "json_object"},
@@ -362,7 +381,18 @@ class DeepSeekTranslator:
             "thinking": {"type": "disabled"},
             # Give JSON enough room while keeping accidental runaway output
             # bounded. DeepSeek may otherwise return a truncated JSON object.
-            "max_tokens": max(2048, min(16384, sum(len(str(item.get("text", ""))) for item in items) * 2 + 1024)),
+            "max_tokens": max(
+                2048,
+                min(
+                    16384,
+                    sum(
+                        len(str(item.get("text", "")))
+                        for item in wire_items
+                    )
+                    * 2
+                    + 1024,
+                ),
+            ),
             "stream": False,
         }
         request = urllib.request.Request(
@@ -395,10 +425,13 @@ class DeepSeekTranslator:
                     )
                     if not isinstance(translations, list):
                         raise TypeError("translations must be a list")
-                    result = {
-                        int(item["id"]): str(item["text"])
-                        for item in translations
-                    }
+                    result: dict[int, str] = {}
+                    duplicate_ids: set[int] = set()
+                    for item in translations:
+                        item_id = int(item["id"])
+                        if item_id in result:
+                            duplicate_ids.add(item_id)
+                        result[item_id] = str(item["text"])
                 except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                     self._bump_usage("schema_failures")
                     # Truncated JSON (commonly finish_reason=length) is a
@@ -410,6 +443,14 @@ class DeepSeekTranslator:
                         {},
                         finish_reason or "invalid JSON",
                     ) from exc
+                unexpected = set(result) - requested_ids
+                if duplicate_ids or unexpected:
+                    self._bump_usage("schema_failures")
+                    raise IncompleteResponseError(
+                        requested_ids,
+                        {},
+                        "duplicate or unexpected segment ids",
+                    )
                 missing = requested_ids - set(result)
                 if missing:
                     self._bump_usage("schema_failures")
@@ -417,6 +458,34 @@ class DeepSeekTranslator:
                     # caller will preserve valid items and repair only missing
                     # IDs, splitting the batch when necessary.
                     raise IncompleteResponseError(missing, result, finish_reason)
+                marker_invalid: set[int] = set()
+                for item_id in requested_ids:
+                    markers = [
+                        int(match.group(1))
+                        for match in SEGMENT_MARKER_RE.finditer(
+                            result.get(item_id, "")
+                        )
+                    ]
+                    if markers != [item_id]:
+                        marker_invalid.add(item_id)
+                    else:
+                        result[item_id] = SEGMENT_MARKER_RE.sub(
+                            "",
+                            result[item_id],
+                            count=1,
+                        ).lstrip()
+                if marker_invalid:
+                    self._bump_usage("schema_failures")
+                    valid = {
+                        item_id: value
+                        for item_id, value in result.items()
+                        if item_id not in marker_invalid
+                    }
+                    raise IncompleteResponseError(
+                        marker_invalid,
+                        valid,
+                        "invalid segment identity marker",
+                    )
                 invalid = {
                     int(item["id"])
                     for item in items
@@ -512,7 +581,13 @@ class DeepSeekTranslator:
 
     def _translate_batch(self, batch: Sequence[str], review: bool = False) -> list[tuple[str, str]]:
         protected = [protect_text(text) for text in batch]
-        items = [{"id": i, "text": value.text} for i, value in enumerate(protected)]
+        items = [
+            {
+                "id": index,
+                "text": value.text,
+            }
+            for index, value in enumerate(protected)
+        ]
         translated = self._request_resilient(items, review=review)
         return [
             (source, protected_text.restore(translated[local_index]).strip())

@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">文档智能翻译器</h1>
-<h3 align="center">Document Translator · v1.3.0</h3>
+<h3 align="center">Document Translator · v1.4.0</h3>
 
 <p align="center">
   保留版式、保护技术编号，批量翻译 PDF、Word、Excel 和 CSV 等文档。<br>
@@ -33,7 +33,7 @@
 
 ### 选择下载版本
 
-v1.3.0 提供三种 Windows 版本：
+v1.4.0 提供三种 Windows 版本：
 
 | 版本 | 包含 BabelDOC 智能 PDF 引擎 | 适合谁 |
 |---|---:|---|
@@ -73,18 +73,18 @@ v1.3.0 提供三种 Windows 版本：
 
 只翻译已有文字层；扫描图片、PDF 转曲文字和没有文字层的页面不会翻译。
 
-### v1.3.0 重点改进
+### v1.4.0 重点改进
 
-- **更快启动：** 主界面按需加载翻译组件，改用文件夹式程序结构，并用轻量启动画面提示正在打开。
-- **可用的 PDF 进度：** 显示解析、版面分析、术语、翻译、排版、字体和保存等真实阶段，同时显示已用时间与动态预计剩余时间。
-- **直接打开结果：** 每个已完成任务都可打开译文或所在文件夹。
-- **在不降低质量的前提下提速：** 多批次翻译并行处理，受速率限制时自动退让；已完成批次及时写入缓存，重试和后续文件可继续复用。
-- **技术内容保护：** 图号、物料号、KKS、标准号、尺寸、单位和网址等在翻译前受到保护。
-- **稳定的缓存上限：** 译文缓存仍限制为 100 MB，超过后按时间删除最旧记录并压缩至约 90 MB。
+- **PDF 生成后自动质检：** 逐页比较原文与译文的文字分布，检查隐藏或裁切文字、内容异常聚集和低于可读下限的字号。
+- **只修问题页：** 自动命中的页面改用保留表格和固定区域的自适应原位排版重新翻译，其余已通过页面不重复处理。
+- **修复后再次复检：** 质量报告记录初检、修复页和复检结果；仍需关注的页码会明确提示。
+- **长段落与目录保护：** 按页面隔离翻译上下文，合并自然换行的正文，同时避免目录、表格、项目符号和技术编号被错误拼接。
+- **纯译文和双语输出同步：** 修复页会同时写回纯译文和双语对照 PDF，保持页数、页面尺寸和未命中页不变。
+- **字号可读性底线：** 自适应修复不会把正文压缩到 5.5 pt 以下。
 
 ### PDF 引擎与术语
 
-“智能排版”使用 [BabelDOC](https://github.com/funstory-ai/BabelDOC)，适合报告、手册和连续正文；“原位保版”适合工程图纸、图签、设备标签和短文本。Setup Full 和 Portable Full 已包含 BabelDOC；Portable Lite 找不到该引擎时会安全回退到原位保版。
+“智能排版”使用 [BabelDOC](https://github.com/funstory-ai/BabelDOC)，适合报告、手册和连续正文；v1.4.0 会在其输出后逐页自检，并只对命中的问题页使用自适应原位排版修复。“原位保版”仍适合工程图纸、图签、设备标签和短文本。Setup Full 和 Portable Full 已包含 BabelDOC；Portable Lite 找不到该引擎时会安全回退到原位保版。
 
 BabelDOC 的程序、布局模型和字体不属于 100 MB 译文缓存，也不会被缓存清理。API Key 仅通过任务临时配置传递，任务结束后删除，并从错误信息中脱敏。
 
@@ -126,7 +126,7 @@ python -m translator_app
 
 ### Choose a download
 
-Version 1.3.0 provides three Windows editions:
+Version 1.4.0 provides three Windows editions:
 
 | Edition | BabelDOC smart PDF engine included | Recommended for |
 |---|---:|---|
@@ -159,22 +159,22 @@ Source files are never overwritten; translated files receive a language suffix. 
 
 Only existing text layers are translated. Scanned images, outlined PDF text, and pages without a text layer are left unchanged.
 
-### Version 1.3.0 highlights
+### Version 1.4.0 highlights
 
-- **Faster startup:** Translation components load only when needed, the application uses a folder-based build, and a lightweight splash gives immediate feedback.
-- **Useful PDF progress:** Parsing, layout analysis, terminology, translation, typesetting, fonts, and save stages are reported with elapsed time and a dynamic ETA.
-- **Open completed results:** Open the translated file or its folder directly from each completed task.
-- **Quality-preserving speed improvements:** Independent batches run concurrently, adaptive rate limiting backs off when required, and completed batches are checkpointed to cache for safe reuse.
-- **Technical-token protection:** Drawing numbers, material IDs, KKS tags, standards, dimensions, units, and URLs are protected before translation.
-- **Unchanged cache limit:** The translation cache remains capped at 100 MB and is compacted to about 90 MB by removing the oldest entries.
+- **Post-generation PDF quality scan:** Every page is checked for hidden or clipped text, collapsed content, abnormal distribution, and unreadably small fonts.
+- **Selective repair:** Only flagged pages are retranslated with an adaptive in-place layout that protects tables and fixed regions.
+- **Verification after repair:** Reports record the initial scan, repaired pages, and a second verification pass, with residual pages called out for review.
+- **Safer long paragraphs and contents pages:** Translation context is isolated by page, natural wrapped lines are grouped, and tables, bullets, technical identifiers, and contents entries are kept separate.
+- **Mono and bilingual consistency:** Repaired pages are written back to both translated-only and bilingual PDFs without changing page count or page size.
+- **Readable font floor:** Adaptive repair does not shrink translated body text below 5.5 pt.
 
 ### PDF engine and terminology
 
-Smart layout uses [BabelDOC](https://github.com/funstory-ai/BabelDOC) for reports, manuals, and prose-heavy documents. Strict in-place placement remains available for drawings, title blocks, equipment labels, and short text. Windows Setup Full and Portable Full include BabelDOC. Portable Lite falls back safely to strict placement when the engine is unavailable.
+Smart layout uses [BabelDOC](https://github.com/funstory-ai/BabelDOC) for reports, manuals, and prose-heavy documents. Version 1.4.0 checks its output page by page and selectively repairs flagged pages with adaptive in-place placement. Strict placement remains available for drawings, title blocks, equipment labels, and short text. Windows Setup Full and Portable Full include BabelDOC. Portable Lite falls back safely to strict placement when the engine is unavailable.
 
 BabelDOC, its layout models, and fonts are application resources, not part of the 100 MB translation cache. The API key is passed through a per-task temporary configuration, deleted after the task, and redacted from backend errors.
 
-User-supplied glossaries can be CSV, TSV, TXT, or XLSX. The selected glossary is remembered and reused for later files. Smart PDF mode can extract terms within the current document, but v1.3.0 **does not automatically build a permanent, reviewable terminology library**. The translation cache is not a terminology database.
+User-supplied glossaries can be CSV, TSV, TXT, or XLSX. The selected glossary is remembered and reused for later files. Smart PDF mode can extract terms within the current document, but v1.4.0 **does not automatically build a permanent, reviewable terminology library**. The translation cache is not a terminology database.
 
 ### Known limitations
 
