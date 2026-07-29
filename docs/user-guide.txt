@@ -13,6 +13,10 @@
 
 推荐：PDF 模式保持“自动选择”。软件会根据页面内容选择智能排版或原位保版。
 
+紧急插队：翻译过程中，点击紧急文件右侧的“向上箭头”。软件会在当前接口
+请求结束后的安全检查点暂停当前文件，先完成紧急文件，再利用缓存继续原文件。
+为保护成品，正在保存文件时不会被强制中断。
+
 
 二、三个发行版本
 
@@ -131,6 +135,10 @@ ENGLISH QUICK GUIDE
 3. Drag PDF, Word, Excel, or CSV files into the window.
 4. Choose source language, target language, and output folder, then start.
 5. When complete, select Open File or Open Folder beside the task.
+
+Urgent priority: select the upward arrow beside an urgent file. The application
+pauses the active file at a safe checkpoint, finishes the urgent file first,
+then resumes the original file from cache.
 
 EDITIONS
 

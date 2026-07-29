@@ -510,6 +510,50 @@ print('Save PDF 100%')
             "second_ZH_DUAL.pdf",
         )
 
+    def test_dynamic_batch_keeps_duplicate_reuse_across_scheduled_files(self):
+        first = self.root / "first.docx"
+        urgent_duplicate = self.root / "urgent.docx"
+        first.write_bytes(b"identical-dynamic-content")
+        urgent_duplicate.write_bytes(b"identical-dynamic-content")
+
+        class SingleOutputEngine:
+            calls = 0
+
+            def translate(inner, source, destination, translator, options, progress=None):
+                del source, translator, options, progress
+                inner.calls += 1
+                destination.write_bytes(b"translated")
+                return FileResult(
+                    input_path=str(first),
+                    output_path=str(destination),
+                    status="completed",
+                    engine="test",
+                    translated_units=3,
+                )
+
+        pipeline = TranslationPipeline()
+        pipeline.begin_dynamic_batch()
+        engine = SingleOutputEngine()
+        with patch.object(pipeline, "engine_for", return_value=engine):
+            first_result = pipeline.run(
+                [first],
+                IdentityTranslator(),
+                TranslationOptions(target_language="zh"),
+            )
+            urgent_result = pipeline.run(
+                [urgent_duplicate],
+                IdentityTranslator(),
+                TranslationOptions(target_language="zh"),
+            )
+
+        self.assertEqual(engine.calls, 1)
+        self.assertEqual(first_result[0].status, "completed")
+        self.assertEqual(urgent_result[0].status, "completed")
+        self.assertEqual(
+            Path(urgent_result[0].output_path).read_bytes(),
+            b"translated",
+        )
+
     def test_babeldoc_progress_maps_stages_and_rich_ratio(self):
         self.assertGreaterEqual(
             BabelDocEngine._progress_from_output("Translate Paragraphs", 0.1), 0.48

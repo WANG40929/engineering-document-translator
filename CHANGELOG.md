@@ -4,6 +4,24 @@
 
 This project follows semantic versioning. Stable builds are available from [GitHub Releases](https://github.com/WANG40929/engineering-document-translator/releases).
 
+## 1.4.1
+
+### 中文
+
+- 新增真正的紧急插队：正在翻译时可将等待中或新添加的文件设为紧急任务，当前文件会在安全检查点暂停，紧急文件完成后再从缓存继续。
+- 插队采用协作式暂停：等待正在进行的接口请求结束，并避免在保存成品时强制终止，从而防止损坏输出文件。
+- 紧急任务、暂停中和已暂停状态会在任务列表与底部状态栏明确显示，紧急任务会自动移动到队列前方。
+- 移除任务表格的单元格虚线焦点框，同时保留整行选择和键盘操作。
+- 新增动态任务队列、运行中新文件插入及“原任务—紧急任务—原任务恢复”回归测试。
+
+### English
+
+- Added true urgent preemption: a waiting or newly added file can become urgent while translation is running; the active file pauses at a safe checkpoint and resumes from cache after urgent work completes.
+- Uses cooperative pausing: finishes the in-flight API request and avoids force termination while an output file is being saved.
+- Shows clear urgent, pausing, and paused states in the task list and footer, and moves urgent work to the front automatically.
+- Removed the dotted table-cell focus frame while preserving row selection and keyboard access.
+- Added regressions for the dynamic queue, newly inserted urgent files, and the active–urgent–resume execution order.
+
 ## 1.4.0
 
 ### 中文

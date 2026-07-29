@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.4.0",
+    [string]$Version = "1.4.1",
     [string]$BabelDocSource = "",
     [string]$BabelDocCache = "$env:USERPROFILE\.cache\babeldoc",
     [string]$Python = "python",

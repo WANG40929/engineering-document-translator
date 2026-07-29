@@ -17,6 +17,17 @@ class TranslationPipeline:
         self.strict_pdf_engine = PdfEngine()
         self.smart_pdf_engine = BabelDocEngine()
         self.engines = [self.strict_pdf_engine, DocxEngine(), XlsxEngine(), CsvEngine(), DocEngine()]
+        self._dynamic_completed_by_hash: dict[str, FileResult] | None = None
+
+    def begin_dynamic_batch(self) -> None:
+        """Preserve exact-duplicate reuse across separately scheduled files.
+
+        The desktop queue runs one file at a time so it can pause between safe
+        checkpoints. A persistent digest map keeps the previous whole-batch
+        optimization even when urgent files change the execution order.
+        """
+
+        self._dynamic_completed_by_hash = {}
 
     def engine_for(self, path: Path, options: TranslationOptions | None = None):
         if path.suffix.lower() == ".pdf" and options is not None:
@@ -80,7 +91,10 @@ class TranslationPipeline:
         for source in sources:
             if source.exists() and source.is_file():
                 size_counts[source.stat().st_size] = size_counts.get(source.stat().st_size, 0) + 1
-        completed_by_hash: dict[str, FileResult] = {}
+        dynamic_batch = self._dynamic_completed_by_hash is not None
+        completed_by_hash = (
+            self._dynamic_completed_by_hash if dynamic_batch else {}
+        )
         total = len(sources)
         file_fractions = [0.0] * total
         for index, source in enumerate(sources):
@@ -119,7 +133,11 @@ class TranslationPipeline:
                     )
                 )
                 continue
-            digest = self._digest(source) if size_counts.get(source.stat().st_size, 0) > 1 else ""
+            digest = (
+                self._digest(source)
+                if dynamic_batch or size_counts.get(source.stat().st_size, 0) > 1
+                else ""
+            )
             previous = completed_by_hash.get(digest) if digest else None
             destination = self.output_path(source, options)
             if previous and previous.output_path and Path(previous.output_path).exists():

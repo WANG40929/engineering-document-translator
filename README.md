@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">文档智能翻译器</h1>
-<h3 align="center">Document Translator · v1.4.0</h3>
+<h3 align="center">Document Translator · v1.4.1</h3>
 
 <p align="center">
   保留版式、保护技术编号，批量翻译 PDF、Word、Excel 和 CSV 等文档。<br>
@@ -33,7 +33,7 @@
 
 ### 选择下载版本
 
-v1.4.0 提供三种 Windows 版本：
+v1.4.1 提供三种 Windows 版本：
 
 | 版本 | 包含 BabelDOC 智能 PDF 引擎 | 适合谁 |
 |---|---:|---|
@@ -51,6 +51,8 @@ v1.4.0 提供三种 Windows 版本：
 2. 打开软件，在“设置”中填写自己的 DeepSeek API Key，并选择目标语言。
 3. 拖入文件或文件夹，点击“开始翻译”。
 4. 完成后直接点击“打开文件”或“打开文件夹”查看结果。
+
+翻译过程中如有紧急文件，点击该任务右侧的“紧急优先”箭头。软件会在当前接口请求结束后的安全检查点暂停当前文件，先完成紧急文件，再利用缓存继续原文件；不会在写入成品时强行中断。
 
 源文件不会被覆盖，译文会自动添加语言后缀。程序界面支持跟随系统语言，也可手动切换为：
 
@@ -73,7 +75,12 @@ v1.4.0 提供三种 Windows 版本：
 
 只翻译已有文字层；扫描图片、PDF 转曲文字和没有文字层的页面不会翻译。
 
-### v1.4.0 重点改进
+### v1.4.1 重点改进
+
+- **真正的紧急插队：** 安全暂停正在处理的文件，优先翻译指定文件，完成后从缓存继续原任务。
+- **任务焦点优化：** 移除表格单元格的虚线焦点框，同时保留整行选择和键盘操作。
+
+### v1.4.0 PDF 质量改进
 
 - **PDF 生成后自动质检：** 逐页比较原文与译文的文字分布，检查隐藏或裁切文字、内容异常聚集和低于可读下限的字号。
 - **只修问题页：** 自动命中的页面改用保留表格和固定区域的自适应原位排版重新翻译，其余已通过页面不重复处理。
@@ -126,7 +133,7 @@ python -m translator_app
 
 ### Choose a download
 
-Version 1.4.0 provides three Windows editions:
+Version 1.4.1 provides three Windows editions:
 
 | Edition | BabelDOC smart PDF engine included | Recommended for |
 |---|---:|---|
@@ -145,6 +152,8 @@ Package and archive names use ASCII characters to prevent garbled filenames in o
 3. Drop files or folders into the window and click **Start Translation**.
 4. When a task finishes, use **Open file** or **Open folder** to view the result.
 
+If an urgent document arrives during translation, select its **Urgent priority** arrow. The application pauses the current file at a safe checkpoint after the in-flight API request, completes the urgent file first, and then resumes the original file from cache. It never force-interrupts while writing an output document.
+
 Source files are never overwritten; translated files receive a language suffix. The interface can follow Windows automatically or be set to Simplified Chinese, English, Russian, Spanish, French, or German.
 
 ### Supported documents
@@ -159,7 +168,12 @@ Source files are never overwritten; translated files receive a language suffix. 
 
 Only existing text layers are translated. Scanned images, outlined PDF text, and pages without a text layer are left unchanged.
 
-### Version 1.4.0 highlights
+### Version 1.4.1 highlights
+
+- **True urgent preemption:** safely pauses the active file, translates the selected urgent file first, then resumes the original task from cache.
+- **Cleaner task selection:** removes the dotted current-cell focus frame while retaining row selection and keyboard access.
+
+### Version 1.4.0 PDF quality highlights
 
 - **Post-generation PDF quality scan:** Every page is checked for hidden or clipped text, collapsed content, abnormal distribution, and unreadably small fonts.
 - **Selective repair:** Only flagged pages are retranslated with an adaptive in-place layout that protects tables and fixed regions.
