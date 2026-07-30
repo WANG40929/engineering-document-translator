@@ -203,6 +203,9 @@ class PdfEngine(TranslationEngine):
                 options.minimum_pdf_font_size,
             )
             if not inserted:
+                result.skipped_units += 1
+                if page_index + 1 not in result.skipped_pages:
+                    result.skipped_pages.append(page_index + 1)
                 result.warnings.append(
                     tr(
                         "warning.pdf_text_overflow",

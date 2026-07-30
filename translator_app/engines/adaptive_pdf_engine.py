@@ -61,10 +61,18 @@ class AdaptivePdfEngine(PdfEngine):
 
     def _page_lines(self, page) -> list[dict]:
         try:
-            table_regions = [
-                fitz.Rect(table.bbox)
-                for table in page.find_tables().tables
-            ]
+            table_regions: list[fitz.Rect] = []
+            for table in page.find_tables().tables:
+                # Cell rectangles must precede the outer table rectangle so
+                # _containing_region selects the smallest valid boundary.
+                # Treating the whole table as one region allowed translated
+                # text to run through adjacent columns.
+                table_regions.extend(
+                    fitz.Rect(cell)
+                    for cell in table.cells
+                    if cell is not None
+                )
+                table_regions.append(fitz.Rect(table.bbox))
         except Exception:
             table_regions = []
 
@@ -189,7 +197,9 @@ class AdaptivePdfEngine(PdfEngine):
             can_merge = (
                 not atom["header"]
                 and not previous["header"]
+                and atom["color"] == previous["color"]
                 and atom["table"] == previous["table"]
+                and atom.get("container_rect") == previous.get("container_rect")
                 and not atom["starts_bullet"]
                 and atom["rotate"] == previous["rotate"] == 0
                 and close_vertically
@@ -230,6 +240,11 @@ class AdaptivePdfEngine(PdfEngine):
                     right = min(right, other.x0 - 4.0)
             right = max(rect.x1, right)
             bottom = page_bottom
+            if container_rect is not None:
+                bottom = min(
+                    bottom,
+                    fitz.Rect(container_rect).y1 - 2.0,
+                )
             for other in visual_rects:
                 if other.y0 < rect.y1 - 0.5:
                     continue
@@ -383,6 +398,16 @@ def repair_pdf_pages(
             progress,
         )
         if result.status != "completed":
+            return result
+        if result.skipped_units:
+            # Never replace the smart-layout page with a repair that already
+            # lost one or more text groups. The previous implementation still
+            # marked this situation completed and made the output worse.
+            result.status = "failed"
+            result.errors.append(
+                "; ".join(result.warnings)
+                or f"{result.skipped_units} repair text groups did not fit"
+            )
             return result
         replace_pdf_pages(translated_path, selected_output, ordered_pages)
         result.input_path = str(source_path)

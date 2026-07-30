@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 import fitz
-from PIL import Image, ImageChops, ImageOps
+from PIL import Image, ImageChops
 
 
 QUALITY_BANDS = 30
@@ -32,6 +32,9 @@ class PageQualityIssue:
     vertical_distribution_change: float
     vertical_spread_loss: float
     text_block_ratio: float
+    line_count_ratio: float
+    overlapping_text_pairs: int
+    overlapping_text_characters: int
 
     def to_dict(self) -> dict:
         value = asdict(self)
@@ -72,6 +75,8 @@ class _PageProfile:
     hidden_characters: int = 0
     internal_placeholder_hits: int = 0
     replacement_character_hits: int = 0
+    overlapping_text_pairs: int = 0
+    overlapping_text_characters: int = 0
 
 
 def _rgb_from_int(value: int) -> tuple[int, int, int]:
@@ -83,32 +88,115 @@ def _coverage(histogram: list[int], upper: int) -> float:
     return sum(histogram[:upper]) / total if total else 0.0
 
 
-def _span_is_hidden(
+def _hidden_character_count(
+    page: fitz.Page,
     raster: Image.Image,
     page_rect: fitz.Rect,
-    span: dict,
     scale: float,
-) -> bool:
-    rect = fitz.Rect(span["bbox"]) & page_rect
-    if rect.is_empty:
-        return False
-    x0 = max(0, min(raster.width, int((rect.x0 - page_rect.x0) * scale)))
-    y0 = max(0, min(raster.height, int((rect.y0 - page_rect.y0) * scale)))
-    x1 = max(0, min(raster.width, int((rect.x1 - page_rect.x0) * scale + 1)))
-    y1 = max(0, min(raster.height, int((rect.y1 - page_rect.y0) * scale + 1)))
-    if x1 <= x0 or y1 <= y0:
-        return False
+) -> int:
+    """Count glyphs that remain in the text layer but are not visibly rendered.
 
-    crop = raster.crop((x0, y0, x1, y1))
-    text_color = _rgb_from_int(int(span.get("color", 0)))
-    solid = Image.new("RGB", crop.size, text_color)
-    difference = ImageChops.difference(crop, solid).convert("L")
-    color_coverage = _coverage(difference.histogram(), 60)
-    dark_coverage = _coverage(ImageOps.grayscale(crop).histogram(), 215)
-    # A glyph may be clipped by the smart engine while remaining in the PDF
-    # text layer. Requiring both tests avoids treating white text on a colored
-    # notice bar as hidden.
-    return color_coverage < 0.004 and dark_coverage < 0.004
+    Smart PDF engines often clip only the lower half or the final characters
+    of a span. Checking the whole span therefore produces false negatives:
+    one visible glyph makes the complete span appear healthy. Raw character
+    boxes let the verifier detect that partial clipping.
+    """
+
+    hidden = 0
+    raw_data = page.get_text("rawdict", flags=fitz.TEXTFLAGS_TEXT)
+    for block in raw_data.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                text_color = _rgb_from_int(int(span.get("color", 0)))
+                for character in span.get("chars", []):
+                    value = str(character.get("c", ""))
+                    if not value or value.isspace():
+                        continue
+                    rect = fitz.Rect(character["bbox"]) & page_rect
+                    if rect.is_empty:
+                        continue
+                    # Symbol-font check marks are commonly exposed as private
+                    # use characters whose PDF text color/shape metadata does
+                    # not describe the visible glyph. Very narrow punctuation
+                    # and stems also contain too few pixels for a stable
+                    # raster-presence test. Neither is a useful clipping
+                    # signal; normal CJK and alphabetic glyphs remain covered.
+                    if (
+                        any("\uf000" <= item <= "\uf8ff" for item in value)
+                        or rect.width / max(rect.height, 0.1) <= 0.32
+                    ):
+                        continue
+                    x0 = max(
+                        0,
+                        min(
+                            raster.width,
+                            int((rect.x0 - page_rect.x0) * scale),
+                        ),
+                    )
+                    y0 = max(
+                        0,
+                        min(
+                            raster.height,
+                            int((rect.y0 - page_rect.y0) * scale),
+                        ),
+                    )
+                    x1 = max(
+                        0,
+                        min(
+                            raster.width,
+                            int((rect.x1 - page_rect.x0) * scale + 1),
+                        ),
+                    )
+                    y1 = max(
+                        0,
+                        min(
+                            raster.height,
+                            int((rect.y1 - page_rect.y0) * scale + 1),
+                        ),
+                    )
+                    if x1 <= x0 or y1 <= y0:
+                        continue
+                    crop = raster.crop((x0, y0, x1, y1))
+                    solid = Image.new("RGB", crop.size, text_color)
+                    difference = ImageChops.difference(crop, solid).convert("L")
+                    if _coverage(difference.histogram(), 80) < 0.003:
+                        hidden += 1
+    return hidden
+
+
+def _line_overlap_metrics(data: dict) -> tuple[int, int]:
+    """Return overlapping text-line pairs and the affected character count."""
+
+    lines: list[tuple[fitz.Rect, int]] = []
+    for block in data.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            text = "".join(
+                str(span.get("text", ""))
+                for span in line.get("spans", [])
+            )
+            compact = "".join(
+                character for character in text if not character.isspace()
+            )
+            if len(compact) >= 2:
+                lines.append((fitz.Rect(line["bbox"]), len(compact)))
+
+    pairs = 0
+    characters = 0
+    for index, (left, left_count) in enumerate(lines):
+        for right, right_count in lines[index + 1 :]:
+            x_overlap = min(left.x1, right.x1) - max(left.x0, right.x0)
+            y_overlap = min(left.y1, right.y1) - max(left.y0, right.y0)
+            if (
+                x_overlap >= min(left.width, right.width) * 0.15
+                and y_overlap >= min(left.height, right.height) * 0.55
+            ):
+                pairs += 1
+                characters += min(left_count, right_count)
+    return pairs, characters
 
 
 def _page_profile(
@@ -179,12 +267,6 @@ def _page_profile(
                 y_values.append((y_center, count))
                 line_used = True
                 block_used = True
-                if (
-                    raster is not None
-                    and count >= 2
-                    and _span_is_hidden(raster, page_rect, span, render_scale)
-                ):
-                    hidden_characters += count
             if line_used:
                 line_count += 1
         if block_used:
@@ -196,6 +278,14 @@ def _page_profile(
     weighted_y_total = sum(y * count for y, count in y_values)
     weighted_y_count = sum(count for _y, count in y_values)
     used_y = [y for y, _count in y_values]
+    if raster is not None:
+        hidden_characters = _hidden_character_count(
+            page,
+            raster,
+            page_rect,
+            render_scale,
+        )
+    overlapping_pairs, overlapping_characters = _line_overlap_metrics(data)
     return _PageProfile(
         histogram=normalized,
         text_characters=text_characters,
@@ -217,6 +307,8 @@ def _page_profile(
         hidden_characters=hidden_characters,
         internal_placeholder_hits=internal_placeholder_hits,
         replacement_character_hits=replacement_character_hits,
+        overlapping_text_pairs=overlapping_pairs,
+        overlapping_text_characters=overlapping_characters,
     )
 
 
@@ -237,6 +329,19 @@ def _compare_profiles(
     centroid_shift = abs(source.centroid - translated.centroid)
     block_ratio = translated.block_count / max(source.block_count, 1)
     line_ratio = translated.line_count / max(source.line_count, 1)
+    hidden_ratio = translated.hidden_characters / max(
+        translated.text_characters,
+        1,
+    )
+    overlap_pair_excess = max(
+        0,
+        translated.overlapping_text_pairs - source.overlapping_text_pairs,
+    )
+    overlap_character_excess = max(
+        0,
+        translated.overlapping_text_characters
+        - source.overlapping_text_characters,
+    )
     font_penalty = (
         max(0.0, MINIMUM_READABLE_FONT - translated.minimum_font_size)
         / MINIMUM_READABLE_FONT
@@ -255,10 +360,16 @@ def _compare_profiles(
         + min(translated.hidden_characters / 12.0, 4.0)
         + min(translated.internal_placeholder_hits * 2.0, 6.0)
         + min(translated.replacement_character_hits * 2.0, 6.0)
+        + min(overlap_character_excess / 12.0, 4.0)
+        + (
+            min((0.58 - line_ratio) * 8.0, 3.0)
+            if source.line_count >= 8 and line_ratio <= 0.58
+            else 0.0
+        )
     )
 
     reasons: list[str] = []
-    if translated.hidden_characters >= 20:
+    if translated.hidden_characters >= 5 and hidden_ratio >= 0.015:
         reasons.append("rendered_text_hidden_or_clipped")
     if translated.internal_placeholder_hits:
         reasons.append("internal_placeholder_leak")
@@ -276,6 +387,10 @@ def _compare_profiles(
         reasons.append("content_collapsed_vertically")
     if block_ratio <= 0.30 and source.block_count >= 8:
         reasons.append("text_blocks_merged")
+    if overlap_pair_excess >= 1 and overlap_character_excess >= 4:
+        reasons.append("text_lines_overlapping")
+    if source.line_count >= 8 and line_ratio <= 0.58:
+        reasons.append("text_lines_collapsed")
     if not reasons:
         return None
 
@@ -295,6 +410,9 @@ def _compare_profiles(
         vertical_distribution_change=round(distribution_change, 4),
         vertical_spread_loss=round(spread_loss, 4),
         text_block_ratio=round(block_ratio, 4),
+        line_count_ratio=round(line_ratio, 4),
+        overlapping_text_pairs=overlap_pair_excess,
+        overlapping_text_characters=overlap_character_excess,
     )
 
 
