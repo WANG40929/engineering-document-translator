@@ -2,7 +2,7 @@
 ; This file is compiled by scripts\build_release.ps1 with /D values.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.4.1"
+  #define MyAppVersion "1.4.2"
 #endif
 #ifndef SourceDir
   #error SourceDir must point to the verified Portable Full staging directory.
@@ -11,7 +11,7 @@
   #define ReleaseDir "..\release"
 #endif
 #ifndef OutputBaseName
-  #define OutputBaseName "DocumentTranslator-v1.4.1-Windows-Setup-Full"
+  #define OutputBaseName "DocumentTranslator-v1.4.2-Windows-Setup-Full"
 #endif
 
 #define MyAppName "Document Translator"

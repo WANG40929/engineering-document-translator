@@ -4,6 +4,26 @@
 
 This project follows semantic versioning. Stable builds are available from [GitHub Releases](https://github.com/WANG40929/engineering-document-translator/releases).
 
+## 1.4.2
+
+### 中文
+
+- 修复智能 PDF 质检的漏报：从整段可见性检查改为逐字检查，可识别只裁掉部分文字或半行文字的情况。
+- 新增文字行重叠与结构行异常合并检测，可发现安全标志说明、项目符号和多栏内容被挤到同一位置的问题。
+- 提示框排版不再合并不同颜色的标题与正文；表格译文严格使用所属单元格边界，不再跨列或跨行。
+- 自适应修复若有任何文字框无法完整写入，将保留原智能排版页，不再用缺字页面覆盖原结果。
+- 使用真实 294 页工程手册进行全量扫描，并以加长中文字符压力样本复检全部问题页；新增相关自动化回归。
+- 同时包含 v1.4.1 的紧急插队与任务表格焦点优化。
+
+### English
+
+- Replaced whole-span visibility checks with per-glyph inspection so partially clipped text and half-hidden lines are detected.
+- Added line-overlap and severe structured-line-collapse detection for safety labels, bullets, and multi-column content.
+- Prevented differently colored notice headings and body text from being merged, and confined table translations to their original cell boundaries.
+- Keeps the original smart-layout page whenever adaptive repair cannot place every text group.
+- Regressed the complete 294-page engineering manual and reran every flagged page with deliberately expanded CJK text.
+- Includes the v1.4.1 urgent-preemption and task-focus improvements.
+
 ## 1.4.1
 
 ### 中文

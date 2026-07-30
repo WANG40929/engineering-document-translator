@@ -61,8 +61,9 @@ Legal
 
 智能排版
   BabelDOC 分析段落、字体和页面结构，DeepSeek 完成翻译，然后重新排版。
-  v1.4.0 会在生成后逐页检查文字分布、隐藏或裁切文字和异常小字号；发现
-  问题时只重译并替换相应页面，其余正常页面保持智能排版结果。
+  v1.4.2 会在生成后逐页检查局部文字裁切、文字行重叠、结构行异常合并、
+  文字分布和异常小字号；发现问题时只重译并替换相应页面。提示框的不同
+  颜色区域和表格单元格保持独立；修复仍放不下文字时保留原智能排版页。
 
 原位保版
   尽量在原文字坐标处替换内容，适合工程图纸、表格和固定位置文字。
@@ -156,9 +157,10 @@ PDF MODES
 
 Automatic is recommended. Smart Layout is best for reports and manuals. Strict
 Layout is best for drawings, labels, tables, and fixed-position content.
-In v1.4.0, Smart Layout is checked page by page after generation. Pages with
-clipped, hidden, collapsed, or unreadably small text are selectively repaired
-without reprocessing pages that passed.
+In v1.4.2, Smart Layout is checked page by page for partial glyph clipping,
+overlapping lines, collapsed structures, abnormal distribution, and unreadably
+small text. Notice regions and table cells remain independent. If every repair
+segment cannot be placed, the original smart-layout page is kept.
 Image-only text is not OCR-translated by default.
 
 GLOSSARIES AND CACHE
