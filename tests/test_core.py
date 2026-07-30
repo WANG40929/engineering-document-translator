@@ -358,6 +358,41 @@ class CoreTests(unittest.TestCase):
             cache.get("auto", "zh", plain_source, translator._cache_signature),
         )
 
+    def test_segment_identity_marker_in_cache_is_selectively_refreshed(self):
+        class RepairingDeepSeek(DeepSeekTranslator):
+            calls = []
+
+            def _request(inner, items, review=False):
+                inner.calls.extend(item["text"] for item in items)
+                return {
+                    int(item["id"]): "Clean translation"
+                    for item in items
+                }
+
+        cache = TranslationCache(self.root / "segment-marker-cache.sqlite3")
+        translator = RepairingDeepSeek(
+            "test-key",
+            cache=cache,
+            quality_review=False,
+        )
+        source = "Safety requirements"
+        cache.put(
+            "auto",
+            "zh",
+            source,
+            "[[UDT_SEGMENT_0003]] Polluted cached translation",
+            translator._cache_signature,
+        )
+
+        result = translator.translate_many([source])
+
+        self.assertEqual(result, ["Clean translation"])
+        self.assertEqual(translator.calls, [source])
+        self.assertNotIn(
+            "UDT_SEGMENT",
+            cache.get("auto", "zh", source, translator._cache_signature),
+        )
+
     def test_cache_trims_oldest_rows_and_compacts_file(self):
         path = self.root / "limited-cache.sqlite3"
         cache = TranslationCache(path, max_cache_bytes=64 * 1024)
@@ -717,6 +752,40 @@ print('Save PDF 100%')
             self.assertGreaterEqual(min(span["size"] for span in spans), 10.5)
         finally:
             translated.close()
+
+    def test_pdf_overflow_preserves_readable_source_text(self):
+        engine = PdfEngine()
+        document = fitz.open()
+        page = document.new_page(width=200, height=100)
+        line = {
+            "text": "dft in µm",
+            "rect": fitz.Rect(20, 20, 65, 28),
+            "fit_rect": fitz.Rect(20, 20, 65, 28),
+            "size": 6.0,
+            "color": (0, 0, 0),
+            "rotate": 0,
+            "align": 0,
+        }
+        result = FileResult("source.pdf", "translated.pdf", engine="test")
+        options = TranslationOptions(
+            target_language="zh",
+            minimum_pdf_font_size=5.5,
+        )
+
+        engine._apply_page_translations(
+            page,
+            0,
+            [line],
+            ["A translation that cannot possibly fit in this narrow cell"],
+            options,
+            result,
+        )
+
+        self.assertEqual(result.skipped_units, 0)
+        self.assertEqual(result.skipped_pages, [])
+        self.assertIn("dft in", page.get_text())
+        self.assertTrue(result.warnings)
+        document.close()
 
     def test_pdf_failure_reports_exact_page_and_preserves_real_progress(self):
         source = self.root / "two-pages.pdf"

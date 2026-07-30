@@ -230,6 +230,7 @@ TRANSLATIONS = {
     "warning.pdf_quality_scan_failed": "Не удалось проверить вёрстку PDF; сохранён результат интеллектуальной вёрстки: {reason}",
     "warning.pdf_quality_repair_failed": "Не удалось автоматически исправить страницы; сохранён результат интеллектуальной вёрстки: {reason}",
     "warning.pdf_text_overflow": "Недостаточно места в текстовом блоке на странице {page}: {text}",
+    "warning.pdf_source_preserved": "Перевод на странице {page} не помещается с читаемым размером шрифта; сохранён исходный текст: {text}",
     "warning.pdf_font_reduced": "Размер шрифта перевода на странице {page} уменьшен до {size:.1f} пт: {text}",
     "install.title": "Установка Document Translator",
     "install.welcome": "Добро пожаловать в мастер установки Document Translator",

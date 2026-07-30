@@ -230,6 +230,7 @@ TRANSLATIONS = {
     "warning.pdf_quality_scan_failed": "Die PDF-Layoutprüfung ist fehlgeschlagen; das intelligente Layout wurde beibehalten: {reason}",
     "warning.pdf_quality_repair_failed": "Die automatische Seitenreparatur ist fehlgeschlagen; das intelligente Layout wurde beibehalten: {reason}",
     "warning.pdf_text_overflow": "Nicht genug Platz im Textfeld auf Seite {page}: {text}",
+    "warning.pdf_source_preserved": "Die Übersetzung passt auf Seite {page} nicht in lesbarer Größe; der Ausgangstext wurde beibehalten: {text}",
     "warning.pdf_font_reduced": "Übersetzungsschrift auf Seite {page} auf {size:.1f} pt verkleinert: {text}",
     "install.title": "Document Translator installieren",
     "install.welcome": "Willkommen beim Setup von Document Translator",

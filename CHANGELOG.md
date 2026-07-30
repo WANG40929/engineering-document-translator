@@ -4,6 +4,28 @@
 
 This project follows semantic versioning. Stable builds are available from [GitHub Releases](https://github.com/WANG40929/engineering-document-translator/releases).
 
+## 1.4.3
+
+### 中文
+
+- PDF 自适应修复改为逐页提交：单个复杂页失败时，其他已经修复成功的页面不再被整批回滚。
+- 目录、列表和相邻同样式内容严格遵守原 PDF 文本块边界，避免多行内容被错误拼成一个段落。
+- 提示框和稀疏伪表格共享完整可用区域，不再把每一行误判成狭窄单元格；保留真正多列表格的单元格边界。
+- 同一原始文本块内的长段落和项目列表统一分配纵向空间，并避免项目符号丢失或出现“• ◆”双重标记。
+- 无法以可读字号容纳译文的极窄技术单元格会保留原规格文字，避免空白框或 2–3 pt 的不可读文字。
+- 清除并拒绝缓存中的内部 `UDT_SEGMENT` 标记，防止内部段落标识进入最终 PDF。
+- 使用用户提供的 294 页工程手册复测：78 个命中页全部完成修复，二次质量扫描无残留问题页。
+
+### English
+
+- Commits adaptive PDF repairs independently by page, so one difficult page no longer rolls back every successful repair in the batch.
+- Keeps contents rows, lists, and adjacent same-style content separated by their original PDF text-block boundaries.
+- Gives notice boxes and sparse pseudo-tables their full shared region while retaining real cell boundaries for dense multi-column tables.
+- Flows long paragraphs and lists within the same source block, without losing bullets or producing duplicate “• ◆” markers.
+- Preserves readable source specification text in extremely narrow technical cells instead of leaving blanks or forcing 2–3 pt output.
+- Rejects and removes cached internal `UDT_SEGMENT` markers before final PDF generation.
+- Regressed the supplied 294-page engineering manual: all 78 flagged pages repaired and the second quality scan reported no residual pages.
+
 ## 1.4.2
 
 ### 中文

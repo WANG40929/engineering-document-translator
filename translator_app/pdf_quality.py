@@ -14,7 +14,11 @@ from PIL import Image, ImageChops
 QUALITY_BANDS = 30
 MINIMUM_READABLE_FONT = 5.5
 INTERNAL_PLACEHOLDER_RE = re.compile(
-    r"(?<![A-Za-z0-9])(?:_{1,2}\s*)?UDT\s*_?\s*\d{4}(?:\s*_{1,2})?(?![A-Za-z0-9])",
+    r"(?:"
+    r"(?<![A-Za-z0-9])(?:_{1,2}\s*)?UDT\s*_?\s*\d{4}(?:\s*_{1,2})?(?![A-Za-z0-9])"
+    r"|"
+    r"\[\s*\[\s*UDT\s*[_\s-]*SEGMENT\s*[_\s-]*\d{4}\s*\]\s*\]"
+    r")",
     re.IGNORECASE,
 )
 

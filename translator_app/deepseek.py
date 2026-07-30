@@ -42,6 +42,10 @@ CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 LATIN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z-]{1,}")
 PLACEHOLDER_RE = re.compile(r"__UDT_\d{4}__")
 SEGMENT_MARKER_RE = re.compile(r"\[\[UDT_SEGMENT_(\d{4})\]\]")
+SEGMENT_MARKER_FLEX_RE = re.compile(
+    r"\[\s*\[\s*UDT\s*[_\s-]*SEGMENT\s*[_\s-]*(\d{4})\s*\]\s*\]",
+    re.IGNORECASE,
+)
 RETRYABLE_HTTP_CODES = {408, 429, 500, 502, 503, 504}
 LONG_SEGMENT_BATCH_THRESHOLD = 1200
 
@@ -707,10 +711,14 @@ class DeepSeekTranslator:
         stale_cache_texts: list[str] = []
         for source, cached in list(cached_values.items()):
             repaired = protect_text(source).restore(cached)
-            if has_internal_placeholder(repaired):
+            if (
+                has_internal_placeholder(repaired)
+                or SEGMENT_MARKER_FLEX_RE.search(repaired)
+            ):
                 # Old versions could cache an un-restored or hallucinated UDT
-                # marker. Do not copy it into another document: evict only the
-                # affected entry and translate that segment again.
+                # placeholder or a segment-identity marker. Do not copy it
+                # into another document: evict only the affected entry and
+                # translate that segment again.
                 stale_cache_texts.append(source)
                 cached_values.pop(source, None)
             elif repaired != cached:

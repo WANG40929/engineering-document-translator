@@ -230,6 +230,7 @@ TRANSLATIONS = {
     "warning.pdf_quality_scan_failed": "PDF 排版自检失败，已保留智能排版结果：{reason}",
     "warning.pdf_quality_repair_failed": "问题页自动修复失败，已保留智能排版结果：{reason}",
     "warning.pdf_text_overflow": "第 {page} 页文字框空间不足：{text}",
+    "warning.pdf_source_preserved": "第 {page} 页译文无法在可读字号内排入，已保留原文：{text}",
     "warning.pdf_font_reduced": "第 {page} 页译文字号缩小至 {size:.1f} pt：{text}",
     "install.title": "安装文档智能翻译器",
     "install.welcome": "欢迎使用文档智能翻译器安装向导",

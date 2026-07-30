@@ -10,6 +10,7 @@ import fitz
 from translator_app.deepseek import IdentityTranslator
 from translator_app.engines.adaptive_pdf_engine import (
     AdaptivePdfEngine,
+    _uses_table_cell_boundaries,
     rebuild_dual_pages,
     repair_pdf_pages,
     replace_pdf_pages,
@@ -188,6 +189,32 @@ class PdfQualityTests(unittest.TestCase):
         self.assertIn("internal_placeholder_leak", report.issues[0].reasons)
         self.assertEqual(report.issues[0].internal_placeholder_hits, 2)
 
+    def test_quality_scan_detects_segment_identity_marker_leak(self):
+        source = self.root / "source.pdf"
+        translated = self.root / "translated.pdf"
+        source_document = fitz.open()
+        source_document.new_page(width=400, height=250).insert_text(
+            (40, 80),
+            "Safety requirements",
+            fontsize=12,
+        )
+        source_document.save(source)
+        source_document.close()
+        translated_document = fitz.open()
+        translated_document.new_page(width=400, height=250).insert_text(
+            (40, 80),
+            "[[UDT_SEGMENT_0003]] translated safety requirements",
+            fontsize=12,
+        )
+        translated_document.save(translated)
+        translated_document.close()
+
+        report = analyze_pdf_quality(source, translated, render_scale=1.5)
+
+        self.assertEqual(report.repair_pages, [1])
+        self.assertIn("internal_placeholder_leak", report.issues[0].reasons)
+        self.assertEqual(report.issues[0].internal_placeholder_hits, 1)
+
     def test_repaired_page_replaces_content_without_changing_page_count(self):
         target = self.root / "target.pdf"
         repaired = self.root / "repaired.pdf"
@@ -284,6 +311,126 @@ class PdfQualityTests(unittest.TestCase):
         self.assertEqual(groups[0]["text"], "NOTICE")
         self.assertTrue(groups[1]["text"].startswith("Material damage"))
 
+    def test_adaptive_layout_keeps_adjacent_same_style_blocks_separate(self):
+        source = self.root / "source.pdf"
+        document = fitz.open()
+        page = document.new_page(width=400, height=300)
+        page.insert_text((50, 100), "First independent item", fontsize=11)
+        page.insert_text((50, 112), "Second independent item", fontsize=11)
+        document.save(source)
+        document.close()
+
+        document = fitz.open(source)
+        try:
+            groups = AdaptivePdfEngine()._page_lines(document[0])
+        finally:
+            document.close()
+
+        self.assertEqual(
+            [group["text"] for group in groups],
+            ["First independent item", "Second independent item"],
+        )
+
+    def test_adaptive_application_flows_items_from_same_source_block(self):
+        lines = [
+            {
+                "text": "First item",
+                "rect": fitz.Rect(80, 100, 220, 115),
+                "redact_rect": fitz.Rect(80, 100, 220, 115),
+                "fit_rect": fitz.Rect(80, 100, 340, 125),
+                "size": 10.0,
+                "color": (0, 0, 0),
+                "rotate": 0,
+                "align": 0,
+                "block": 7,
+                "bold": False,
+                "table": False,
+                "container_rect": None,
+                "header": False,
+                "starts_bullet": True,
+                "strip_generated_bullet": True,
+            },
+            {
+                "text": "Indented continuation",
+                "rect": fitz.Rect(110, 116, 260, 131),
+                "redact_rect": fitz.Rect(110, 116, 260, 131),
+                "fit_rect": fitz.Rect(110, 116, 340, 170),
+                "size": 10.0,
+                "color": (0, 0, 0),
+                "rotate": 0,
+                "align": 0,
+                "block": 7,
+                "bold": True,
+                "table": False,
+                "container_rect": None,
+                "header": False,
+                "starts_bullet": False,
+                "strip_generated_bullet": True,
+            },
+        ]
+
+        rendered_lines, rendered_translations = (
+            AdaptivePdfEngine()._coalesce_application_lines(
+                lines,
+                ["第一项", "缩进续行"],
+            )
+        )
+
+        self.assertEqual(len(rendered_lines), 1)
+        self.assertIn("\n", rendered_translations[0])
+        self.assertTrue(rendered_translations[0].startswith("◆ "))
+        self.assertTrue(rendered_translations[0].splitlines()[1].startswith(" "))
+        self.assertEqual(rendered_lines[0]["fit_rect"].y1, 170)
+
+    def test_adaptive_flow_does_not_duplicate_preserved_bullet(self):
+        lines = [
+            {
+                "text": "Lead paragraph",
+                "rect": fitz.Rect(80, 100, 260, 115),
+                "redact_rect": fitz.Rect(80, 100, 260, 115),
+                "fit_rect": fitz.Rect(80, 100, 340, 125),
+                "size": 10.0,
+                "color": (0, 0, 0),
+                "rotate": 0,
+                "align": 0,
+                "block": 7,
+                "bold": False,
+                "table": False,
+                "container_rect": None,
+                "header": False,
+                "starts_bullet": False,
+                "bullet_rect": None,
+                "strip_generated_bullet": True,
+            },
+            {
+                "text": "Bullet item",
+                "rect": fitz.Rect(110, 116, 260, 131),
+                "redact_rect": fitz.Rect(110, 116, 260, 131),
+                "fit_rect": fitz.Rect(110, 116, 340, 170),
+                "size": 10.0,
+                "color": (0, 0, 0),
+                "rotate": 0,
+                "align": 0,
+                "block": 7,
+                "bold": False,
+                "table": False,
+                "container_rect": None,
+                "header": False,
+                "starts_bullet": True,
+                "bullet_rect": fitz.Rect(68, 116, 76, 126),
+                "strip_generated_bullet": True,
+            },
+        ]
+
+        _rendered, translations = (
+            AdaptivePdfEngine()._coalesce_application_lines(
+                lines,
+                ["Lead", "Item"],
+            )
+        )
+
+        self.assertNotIn("◆", translations[0])
+
     def test_adaptive_layout_respects_table_cell_boundaries(self):
         source = self.root / "source.pdf"
         document = fitz.open()
@@ -320,6 +467,56 @@ class PdfQualityTests(unittest.TestCase):
         self.assertLessEqual(component["fit_rect"].x1, 200)
         self.assertLessEqual(component["fit_rect"].y1, 100)
         self.assertGreaterEqual(supplier["fit_rect"].x0, 200)
+
+    def test_sparse_notice_grid_is_not_treated_as_table_cells(self):
+        class Table:
+            row_count = 11
+            col_count = 3
+            cells = [(0, 0, 1, 1)] * 15 + [None] * 18
+
+        self.assertFalse(_uses_table_cell_boundaries(Table()))
+
+    def test_dense_multi_column_grid_uses_table_cells(self):
+        class Table:
+            row_count = 4
+            col_count = 3
+            cells = [(0, 0, 1, 1)] * 12
+
+        self.assertTrue(_uses_table_cell_boundaries(Table()))
+
+    def test_adaptive_layout_uses_whole_single_column_notice_region(self):
+        source = self.root / "source.pdf"
+        document = fitz.open()
+        page = document.new_page(width=400, height=300)
+        for x in (40, 360):
+            page.draw_line((x, 60), (x, 180), color=(0, 0, 0))
+        for y in (60, 100, 140, 180):
+            page.draw_line((40, y), (360, y), color=(0, 0, 0))
+        page.insert_text((50, 85), "First notice paragraph", fontsize=10)
+        page.insert_text((50, 125), "Second notice paragraph", fontsize=10)
+        page.insert_text((50, 165), "Third notice paragraph", fontsize=10)
+        document.save(source)
+        document.close()
+
+        document = fitz.open(source)
+        try:
+            groups = AdaptivePdfEngine()._page_lines(document[0])
+        finally:
+            document.close()
+
+        containers = {
+            (
+                tuple(
+                    round(value, 1)
+                    for value in fitz.Rect(group["container_rect"])
+                )
+                if group["container_rect"] is not None
+                else None
+            )
+            for group in groups
+            if group["text"].endswith("notice paragraph")
+        }
+        self.assertEqual(len(containers), 1)
 
     def test_adaptive_repair_does_not_replace_page_after_text_overflow(self):
         source = self.root / "source.pdf"
@@ -359,6 +556,79 @@ class PdfQualityTests(unittest.TestCase):
         document = fitz.open(target)
         try:
             self.assertIn("Keep this smart-layout page", document[0].get_text())
+        finally:
+            document.close()
+
+    def test_adaptive_repair_commits_good_pages_and_rolls_back_failed_page(self):
+        source = self.root / "source.pdf"
+        target = self.root / "target.pdf"
+        source_document = fitz.open()
+        source_document.new_page(width=400, height=500).insert_text(
+            (40, 80),
+            "Successful repaired page",
+        )
+        source_document.new_page(width=400, height=500).insert_text(
+            (40, 80),
+            "Failed repair source page",
+        )
+        source_document.save(source)
+        source_document.close()
+
+        target_document = fitz.open()
+        target_document.new_page(width=400, height=500).insert_text(
+            (40, 80),
+            "Old first smart-layout page",
+        )
+        target_document.new_page(width=400, height=500).insert_text(
+            (40, 80),
+            "Keep failed second smart-layout page",
+        )
+        target_document.save(target)
+        target_document.close()
+
+        def fake_translate(
+            _engine,
+            selected_source,
+            selected_output,
+            _translator,
+            _options,
+            _progress,
+        ):
+            selected = fitz.open(selected_source)
+            try:
+                selected.save(selected_output)
+            finally:
+                selected.close()
+            return FileResult(
+                input_path=str(selected_source),
+                output_path=str(selected_output),
+                status="completed",
+                skipped_units=1,
+                skipped_pages=[2],
+                warnings=["second repair page did not fit"],
+            )
+
+        with patch.object(AdaptivePdfEngine, "translate", fake_translate):
+            result = repair_pdf_pages(
+                source,
+                target,
+                [1, 2],
+                IdentityTranslator(),
+                TranslationOptions(target_language="zh"),
+            )
+
+        self.assertEqual(result.status, "completed", result.errors)
+        self.assertEqual(result.usage["repaired_pages"], [1])
+        self.assertEqual(result.usage["failed_pages"], [2])
+        self.assertEqual(result.skipped_pages, [2])
+        document = fitz.open(target)
+        try:
+            self.assertIn("Successful repaired page", document[0].get_text())
+            self.assertNotIn("Old first smart-layout page", document[0].get_text())
+            self.assertIn(
+                "Keep failed second smart-layout page",
+                document[1].get_text(),
+            )
         finally:
             document.close()
 

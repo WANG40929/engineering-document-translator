@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">文档智能翻译器</h1>
-<h3 align="center">Document Translator · v1.4.2</h3>
+<h3 align="center">Document Translator · v1.4.3</h3>
 
 <p align="center">
   保留版式、保护技术编号，批量翻译 PDF、Word、Excel 和 CSV 等文档。<br>
@@ -33,7 +33,7 @@
 
 ### 选择下载版本
 
-v1.4.2 提供三种 Windows 版本：
+v1.4.3 提供三种 Windows 版本：
 
 | 版本 | 包含 BabelDOC 智能 PDF 引擎 | 适合谁 |
 |---|---:|---|
@@ -75,13 +75,14 @@ v1.4.2 提供三种 Windows 版本：
 
 只翻译已有文字层；扫描图片、PDF 转曲文字和没有文字层的页面不会翻译。
 
-### v1.4.2 重点改进
+### v1.4.3 重点改进
 
-- **真正的紧急插队：** 安全暂停正在处理的文件，优先翻译指定文件，完成后从缓存继续原任务。
-- **任务焦点优化：** 移除表格单元格的虚线焦点框，同时保留整行选择和键盘操作。
-- **PDF 漏检修复：** 逐字检查局部裁切，并新增文字行重叠和结构行异常合并检测。
-- **复杂版面保护：** 提示框不同颜色内容不会错误合并，表格译文严格限制在所属单元格内。
-- **失败保护：** 自适应修复如果仍有文字无法放入，不再替换原智能排版页。
+- **逐页独立修复：** 单个复杂页失败不再让其他已修好的页面整批回滚。
+- **目录与列表保护：** 严格遵守原 PDF 文本块边界，避免目录、项目列表和相邻段落被拼成一团。
+- **提示框与表格兼容：** 稀疏提示框共享完整可用区域，真正的多列表格仍限制在原单元格内。
+- **项目符号稳定：** 长段落和列表可共享纵向空间，同时避免项目符号消失或出现双重标记。
+- **可读性优先：** 极窄技术单元格放不下可读字号译文时保留原规格文字，不留空白、不压成 2–3 pt。
+- **缓存污染防护：** 自动清除旧缓存中意外残留的内部 `UDT_SEGMENT` 标记。
 
 ### v1.4.0 PDF 质量改进
 
@@ -136,7 +137,7 @@ python -m translator_app
 
 ### Choose a download
 
-Version 1.4.2 provides three Windows editions:
+Version 1.4.3 provides three Windows editions:
 
 | Edition | BabelDOC smart PDF engine included | Recommended for |
 |---|---:|---|
@@ -171,13 +172,14 @@ Source files are never overwritten; translated files receive a language suffix. 
 
 Only existing text layers are translated. Scanned images, outlined PDF text, and pages without a text layer are left unchanged.
 
-### Version 1.4.2 highlights
+### Version 1.4.3 highlights
 
-- **True urgent preemption:** safely pauses the active file, translates the selected urgent file first, then resumes the original task from cache.
-- **Cleaner task selection:** removes the dotted current-cell focus frame while retaining row selection and keyboard access.
-- **Stronger PDF defect detection:** checks partial glyph clipping, newly introduced line overlap, and severe structured-line collapse.
-- **Safer complex layouts:** prevents differently colored notice content from being merged and confines translated table text to its original cell.
-- **Fail-safe repair:** keeps the original smart-layout page when a repair cannot place every text group.
+- **Page-transactional repair:** one difficult page no longer rolls back every successfully repaired page.
+- **Contents and list protection:** original PDF text-block boundaries prevent adjacent rows and paragraphs from collapsing together.
+- **Notice and table compatibility:** sparse notice regions share usable space while real multi-column tables remain cell-bounded.
+- **Stable bullets:** long blocks can share vertical space without losing bullets or producing duplicate markers.
+- **Readability-first fallback:** extremely narrow technical cells preserve source specifications instead of becoming blank or shrinking to 2–3 pt.
+- **Cache contamination protection:** cached internal `UDT_SEGMENT` markers are rejected and removed before output.
 
 ### Version 1.4.0 PDF quality highlights
 
