@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -24,12 +26,15 @@ from PySide6.QtWidgets import (
 from . import __version__
 from .config import AppConfig, app_data_dir
 from .i18n import I18n, get_language, normalize_language_code, tr
+from .providers import PRESETS, ProviderProfile, get_preset, new_profile
 
 
 class SettingsDialog(QDialog):
     """Compact settings window with a product introduction tab."""
 
-    def __init__(self, config: AppConfig, api_key: str, save_key: bool, parent=None):
+    connection_tested = Signal(bool, str, list)
+
+    def __init__(self, config: AppConfig, api_keys: dict[str, str], save_key: bool, parent=None):
         super().__init__(parent)
         self.setFont(
             QFont("Microsoft YaHei UI" if get_language() == "zh-CN" else "Segoe UI")
@@ -45,7 +50,10 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(18, 18, 18, 14)
         layout.setSpacing(14)
         tabs = QTabWidget()
-        tabs.addTab(self._translation_tab(config, api_key, save_key), tr("settings.tab_translation"))
+        self.profile_values = [item.to_dict() for item in config.profiles()]
+        self.api_keys = dict(api_keys)
+        self._current_profile_index = -1
+        tabs.addTab(self._translation_tab(config, save_key), tr("settings.tab_translation"))
         tabs.addTab(self._advanced_tab(config), tr("settings.tab_advanced"))
         header_icon = Path(__file__).parent / "assets" / "header-mark.svg"
         tabs.addTab(
@@ -76,9 +84,13 @@ class SettingsDialog(QDialog):
             QPushButton#saveButton { background:#1f67e8; color:white; border:none; font-weight:700; }
         """)
 
-    def _translation_tab(self, config, api_key, save_key):
-        tab = QWidget()
-        form = QFormLayout(tab)
+    def _translation_tab(self, config, save_key):
+        tab = QScrollArea()
+        tab.setWidgetResizable(True)
+        tab.setFrameShape(QScrollArea.NoFrame)
+        content = QWidget()
+        tab.setWidget(content)
+        form = QFormLayout(content)
         form.setContentsMargins(22, 24, 22, 22)
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(14)
@@ -99,7 +111,37 @@ class SettingsDialog(QDialog):
         language_box.addWidget(language_note)
         form.addRow(tr("language.interface"), language_box)
 
-        self.key_edit = QLineEdit(api_key)
+        self.profile_combo = QComboBox()
+        for item in self.profile_values:
+            self.profile_combo.addItem(item["name"], item["id"])
+        active_index = self.profile_combo.findData(config.active_provider_id)
+        self.profile_combo.setCurrentIndex(max(0, active_index))
+        add_profile = QPushButton(tr("settings.provider_add"))
+        remove_profile = QPushButton(tr("settings.provider_remove"))
+        add_profile.clicked.connect(self._add_profile)
+        remove_profile.clicked.connect(self._remove_profile)
+        profile_row = QHBoxLayout()
+        profile_row.addWidget(self.profile_combo, 1)
+        profile_row.addWidget(add_profile)
+        profile_row.addWidget(remove_profile)
+        form.addRow(tr("settings.provider_profile"), profile_row)
+
+        self.provider_combo = QComboBox()
+        for preset in PRESETS:
+            self.provider_combo.addItem(preset.name, preset.id)
+        self.provider_combo.currentIndexChanged.connect(self._provider_changed)
+        form.addRow(tr("settings.provider"), self.provider_combo)
+
+        self.profile_name_edit = QLineEdit()
+        form.addRow(tr("settings.profile_name"), self.profile_name_edit)
+        self.base_url_edit = QLineEdit()
+        self.base_url_edit.setPlaceholderText("https://…/chat/completions")
+        form.addRow(tr("settings.base_url"), self.base_url_edit)
+        self.model_edit = QComboBox()
+        self.model_edit.setEditable(True)
+        form.addRow(tr("settings.model"), self.model_edit)
+
+        self.key_edit = QLineEdit()
         self.key_edit.setEchoMode(QLineEdit.Password)
         self.key_edit.setPlaceholderText("sk-…")
         self.save_key = QCheckBox(tr("settings.save_key_windows"))
@@ -109,6 +151,19 @@ class SettingsDialog(QDialog):
         key_box.addWidget(self.key_edit)
         key_box.addWidget(self.save_key)
         form.addRow(tr("settings.api_key"), key_box)
+
+        test_button = QPushButton(tr("settings.test_connection"))
+        test_button.clicked.connect(self._test_connection)
+        self.test_button = test_button
+        form.addRow("", test_button)
+
+        self.fallback_combo = QComboBox()
+        self.fallback_combo.addItem(tr("settings.no_fallback"), "")
+        for item in self.profile_values:
+            self.fallback_combo.addItem(item["name"], item["id"])
+        fallback_index = self.fallback_combo.findData(config.fallback_provider_id)
+        self.fallback_combo.setCurrentIndex(max(0, fallback_index))
+        form.addRow(tr("settings.fallback_provider"), self.fallback_combo)
 
         self.glossary_edit = QLineEdit(config.glossary_path)
         self.glossary_edit.setPlaceholderText(tr("settings.glossary_placeholder"))
@@ -131,7 +186,111 @@ class SettingsDialog(QDialog):
         options.addWidget(self.quality_review)
         options.addWidget(self.force_refresh)
         form.addRow(tr("settings.quality_options"), options)
+        self.profile_combo.currentIndexChanged.connect(self._profile_changed)
+        self.connection_tested.connect(self._connection_test_finished)
+        self._load_profile(self.profile_combo.currentIndex())
         return tab
+
+    def _store_current_profile(self):
+        index = self._current_profile_index
+        if index < 0 or index >= len(self.profile_values):
+            return
+        item = self.profile_values[index]
+        item.update({
+            "name": self.profile_name_edit.text().strip() or self.provider_combo.currentText(),
+            "provider": self.provider_combo.currentData(),
+            "api_style": get_preset(self.provider_combo.currentData()).api_style,
+            "base_url": self.base_url_edit.text().strip(),
+            "model": self.model_edit.currentText().strip(),
+        })
+        self.api_keys[item["id"]] = self.key_edit.text().strip()
+        self.profile_combo.setItemText(index, item["name"])
+
+    def _load_profile(self, index):
+        if index < 0 or index >= len(self.profile_values):
+            return
+        self._current_profile_index = index
+        item = ProviderProfile.from_dict(self.profile_values[index])
+        self.provider_combo.blockSignals(True)
+        self.provider_combo.setCurrentIndex(max(0, self.provider_combo.findData(item.provider)))
+        self.provider_combo.blockSignals(False)
+        self.profile_name_edit.setText(item.name)
+        self.base_url_edit.setText(item.base_url)
+        self.model_edit.clear()
+        if item.model:
+            self.model_edit.addItem(item.model)
+        self.model_edit.setCurrentText(item.model)
+        self.key_edit.setText(self.api_keys.get(item.id, ""))
+        self.key_edit.setEnabled(item.preset.requires_api_key)
+
+    def _profile_changed(self, index):
+        previous = self._current_profile_index
+        if previous != index:
+            self._store_current_profile()
+            self._load_profile(index)
+
+    def _provider_changed(self):
+        preset = get_preset(self.provider_combo.currentData())
+        self.profile_name_edit.setText(preset.name)
+        self.base_url_edit.setText(preset.base_url)
+        self.model_edit.clear()
+        self.model_edit.setCurrentText(preset.default_model)
+        self.key_edit.setEnabled(preset.requires_api_key)
+
+    def _add_profile(self):
+        self._store_current_profile()
+        item = new_profile("deepseek").to_dict()
+        self.profile_values.append(item)
+        self.profile_combo.addItem(item["name"], item["id"])
+        self.fallback_combo.addItem(item["name"], item["id"])
+        self.profile_combo.setCurrentIndex(len(self.profile_values) - 1)
+
+    def _remove_profile(self):
+        if len(self.profile_values) <= 1:
+            return
+        index = self.profile_combo.currentIndex()
+        item = self.profile_values.pop(index)
+        self.api_keys.pop(item["id"], None)
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.removeItem(index)
+        self.profile_combo.blockSignals(False)
+        fallback_index = self.fallback_combo.findData(item["id"])
+        if fallback_index >= 0:
+            self.fallback_combo.removeItem(fallback_index)
+        self._current_profile_index = -1
+        self._load_profile(self.profile_combo.currentIndex())
+
+    def _test_connection(self):
+        self._store_current_profile()
+        item = ProviderProfile.from_dict(self.profile_values[self.profile_combo.currentIndex()])
+        key = self.api_keys.get(item.id, "")
+        self.test_button.setEnabled(False)
+        self.test_button.setText(tr("settings.testing_connection"))
+
+        def worker():
+            try:
+                from .deepseek import DeepSeekTranslator
+                translator = DeepSeekTranslator.from_profile(item, key, timeout=30, quality_review=False)
+                ok, message = translator.test_connection()
+                models = translator.list_models() if ok else []
+                self.connection_tested.emit(ok, message, models)
+            except Exception as exc:
+                self.connection_tested.emit(False, str(exc), [])
+
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _connection_test_finished(self, ok, message, models):
+        self.test_button.setEnabled(True)
+        self.test_button.setText(tr("settings.test_connection"))
+        if ok and models:
+            current = self.model_edit.currentText()
+            self.model_edit.clear()
+            self.model_edit.addItems(models)
+            index = self.model_edit.findText(current)
+            self.model_edit.setCurrentIndex(max(0, index))
+        box = QMessageBox.information if ok else QMessageBox.warning
+        box(self, tr("settings.connection_test_title"), message)
 
     def _advanced_tab(self, config):
         tab = QWidget()
@@ -261,10 +420,14 @@ class SettingsDialog(QDialog):
             self.babeldoc_edit.setText(path)
 
     def values(self) -> dict:
+        self._store_current_profile()
         return {
             "ui_language": self.ui_language.currentData(),
-            "api_key": self.key_edit.text().strip(),
+            "api_keys": dict(self.api_keys),
             "save_key": self.save_key.isChecked(),
+            "provider_profiles": list(self.profile_values),
+            "active_provider_id": self.profile_combo.currentData(),
+            "fallback_provider_id": self.fallback_combo.currentData() or "",
             "glossary_path": self.glossary_edit.text().strip(),
             "pure_target_language": self.pure_target.isChecked(),
             "quality_review": self.quality_review.isChecked(),

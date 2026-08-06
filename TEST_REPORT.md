@@ -1,4 +1,16 @@
-# v1.4.0 验证报告 / Verification Report
+# v1.5.0 验证报告 / Verification Report
+
+## v1.5.0 多供应商回归 / Multi-provider regression
+
+- 2026-08-06 使用项目 PySide6 打包环境运行 120 项自动化测试，全部通过。
+- 覆盖 OpenAI-compatible、Anthropic Messages、Azure OpenAI 请求格式与响应解析；使用模拟响应，没有调用付费 API。
+- 覆盖 18 个内置预设、本地无密钥接口、旧 DeepSeek 配置与密钥迁移、多配置 DPAPI 加密、缓存隔离、连接模型列表、故障备用和智能 PDF 降级。
+- 六种界面语言、设置页滚动布局、主窗口、紧急插队以及原有 PDF/DOCX/XLSX/CSV 回归全部通过。
+
+- On 2026-08-06, all 120 automated tests passed in the packaged PySide6 environment.
+- Coverage includes OpenAI-compatible, Anthropic Messages, and Azure OpenAI request/response formats using mocked network responses only.
+- Coverage includes 18 presets, keyless local servers, legacy migration, per-profile DPAPI storage, cache isolation, model discovery, failover, and smart-PDF fallback.
+- All six UI languages, settings layout, main window, urgent preemption, and existing PDF/DOCX/XLSX/CSV regressions passed.
 
 ## 中文
 

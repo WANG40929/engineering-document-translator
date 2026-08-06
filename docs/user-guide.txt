@@ -6,7 +6,7 @@
 一、五步开始翻译
 
 1. 双击 DocumentTranslator.exe。
-2. 打开右上角“设置”，填写自己的 DeepSeek API Key，确认接口地址和模型后保存。
+2. 打开右上角“设置”，选择 API 供应商并填写自己的 API Key，确认接口地址和模型后保存。
 3. 把 PDF、Word、Excel 或 CSV 文件拖入窗口，也可以点击选择文件。
 4. 确认源语言、目标语言和输出目录，点击“开始翻译”。
 5. 完成后点击任务右侧的“打开”，或点击“打开文件夹”定位译文。
@@ -16,6 +16,15 @@
 紧急插队：翻译过程中，点击紧急文件右侧的“向上箭头”。软件会在当前接口
 请求结束后的安全检查点暂停当前文件，先完成紧急文件，再利用缓存继续原文件。
 为保护成品，正在保存文件时不会被强制中断。
+
+API 供应商：内置 DeepSeek、OpenAI、Anthropic Claude、Google Gemini、
+阿里云百炼/Qwen、Azure OpenAI、Moonshot/Kimi、智谱 GLM、火山方舟/豆包、
+SiliconFlow、OpenRouter、Mistral、Groq、Together AI，以及本地 Ollama、
+LM Studio、vLLM；也可填写任意 OpenAI-compatible 接口。
+
+每个服务配置独立保存接口、模型和 Windows 加密的 API Key。可以指定故障
+备用服务。缓存按供应商、协议、接口和模型隔离。软件记录实际返回的 token，
+不估算费用。
 
 
 二、三个发行版本
@@ -60,7 +69,7 @@ Legal
   PDF 优先使用原位保版。
 
 智能排版
-  BabelDOC 分析段落、字体和页面结构，DeepSeek 完成翻译，然后重新排版。
+  BabelDOC 分析段落、字体和页面结构，所选模型服务完成翻译，然后重新排版。
   v1.4.4 会在生成后逐页检查半字裁切、横线遮字、孤立源文残片、文字行
   重叠、结构行异常合并、文字分布和异常小字号；发现问题时只重译相应页面。
   提示框使用完整可用区域，真正的表格仍保持单元格边界。修复页再次验收，
@@ -118,7 +127,7 @@ py -3.12 -m venv "$env:LOCALAPPDATA\DocumentTranslator\babeldoc-env"
   安装并在设置中选择 babeldoc.exe。
 
 进度一段时间没有变化
-  查看任务阶段文字。首次加载版面模型、等待 DeepSeek 网络响应或大页面重新
+  查看任务阶段文字。首次加载版面模型、等待模型服务网络响应或大页面重新
   排版可能需要时间；只有软件明确报告停滞或失败时才需要重试。
 
 翻译文件在哪里
@@ -133,7 +142,7 @@ ENGLISH QUICK GUIDE
 ============================================================
 
 1. Run DocumentTranslator.exe.
-2. Open Settings and enter your own DeepSeek API key, endpoint, and model.
+2. Open Settings, choose an API provider, and enter your own key, endpoint, and model.
 3. Drag PDF, Word, Excel, or CSV files into the window.
 4. Choose source language, target language, and output folder, then start.
 5. When complete, select Open File or Open Folder beside the task.
@@ -141,6 +150,14 @@ ENGLISH QUICK GUIDE
 Urgent priority: select the upward arrow beside an urgent file. The application
 pauses the active file at a safe checkpoint, finishes the urgent file first,
 then resumes the original file from cache.
+
+API PROVIDERS AND FALLBACK
+
+Built-in profiles cover major hosted providers plus local Ollama, LM Studio,
+and vLLM. Any OpenAI-compatible endpoint can be entered manually. Profiles use
+separate Windows-encrypted keys and can have an optional failure fallback.
+Cache is isolated by provider, protocol, endpoint, and model. Actual returned
+tokens are recorded; prices are not estimated.
 
 EDITIONS
 

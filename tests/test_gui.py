@@ -20,7 +20,9 @@ try:
     from translator_app.i18n import I18n, set_language
     from translator_app.models import FileResult, TranslationOptions
     from translator_app.qt_gui import NoFocusRectDelegate, TranslatorWindow
+    from translator_app.providers import default_profile
     from translator_app.secret_store import SecretStore
+    from translator_app.settings_dialog import SettingsDialog
     from translator_app.task_queue import PreemptiveTaskQueue
 
     HAS_QT = True
@@ -70,6 +72,22 @@ class GuiTests(unittest.TestCase):
                     window.close()
                     window.deleteLater()
                     self.app.processEvents()
+
+    def test_provider_settings_support_multiple_profiles_in_scrollable_page(self):
+        config = AppConfig(ui_language="zh-CN")
+        dialog = SettingsDialog(config, {"deepseek-default": "test-key"}, True)
+        try:
+            self.assertGreaterEqual(dialog.provider_combo.count(), 18)
+            self.assertEqual(dialog.profile_combo.count(), 1)
+            dialog._add_profile()
+            self.assertEqual(dialog.profile_combo.count(), 2)
+            values = dialog.values()
+            self.assertEqual(len(values["provider_profiles"]), 2)
+            self.assertIn("api_keys", values)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            self.app.processEvents()
 
     def test_runtime_language_switch_retranslates_existing_task_cells(self):
         window = self._window("zh-CN")
@@ -318,7 +336,7 @@ class GuiTests(unittest.TestCase):
                 ]
 
             with (
-                patch("translator_app.deepseek.DeepSeekTranslator", return_value=object()),
+                patch("translator_app.deepseek.DeepSeekTranslator.from_profile", return_value=object()),
                 patch("translator_app.cache.TranslationCache", return_value=object()),
                 patch("translator_app.text_utils.load_glossary", return_value={}),
                 patch("translator_app.pipeline.TranslationPipeline.run", new=fake_run),
@@ -328,9 +346,11 @@ class GuiTests(unittest.TestCase):
                 ),
                 patch("translator_app.qt_gui.QMessageBox.information"),
             ):
+                profile = default_profile()
+                window.api_keys[profile.id] = "test-key"
                 window._worker(
                     window.run_queue,
-                    "test-key",
+                    profile,
                     TranslationOptions(output_dir=root),
                 )
 

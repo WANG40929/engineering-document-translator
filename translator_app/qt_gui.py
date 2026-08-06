@@ -21,7 +21,8 @@ from .config import ConfigStore
 from .file_types import SUPPORTED_EXTENSIONS, collect_files
 from .i18n import get_language, set_language, tr
 from .models import TranslationOptions
-from .secret_store import SecretStore
+from .providers import ProviderProfile
+from .secret_store import ProviderSecretStore, SecretStore
 from .settings_dialog import SettingsDialog
 from .task_queue import PreemptiveTaskQueue
 
@@ -558,6 +559,7 @@ class TranslatorWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config_store, self.secret_store = ConfigStore(), SecretStore()
+        self.provider_secret_store = ProviderSecretStore(legacy=self.secret_store)
         self.saved = self.config_store.load()
         set_language(self.saved.ui_language)
         self.setFont(QFont(_ui_font_family()))
@@ -571,8 +573,8 @@ class TranslatorWindow(QMainWindow):
         # remain separated. A lower minimum caused the table to paint over the
         # drop-zone border even though the window still appeared resizable.
         self.setMinimumSize(900, 670)
-        self.api_key = self.secret_store.load()
-        self.save_key_enabled = bool(self.api_key)
+        self.api_keys = self.provider_secret_store.load_all()
+        self.save_key_enabled = bool(self.api_keys)
         self.outputs_by_input: dict[str, list[Path]] = {}
         self.active_run_paths: list[str] = []
         self.run_queue: PreemptiveTaskQueue | None = None
@@ -693,14 +695,8 @@ class TranslatorWindow(QMainWindow):
         summary_layout.addWidget(self._separator())
         self.model_combo = QComboBox()
         self.model_combo.setEditable(True)
-        self.model_combo.addItem(tr("main.model_flash"), "deepseek-v4-flash")
-        self.model_combo.addItem(tr("main.model_pro"), "deepseek-v4-pro")
-        saved_model_index = self.model_combo.findData(self.saved.model or "deepseek-v4-flash")
-        if saved_model_index >= 0:
-            self.model_combo.setCurrentIndex(saved_model_index)
-        else:
-            self.model_combo.setCurrentText(self.saved.model)
-        self.model_combo.setToolTip(tr("main.model_tooltip"))
+        active_profile = self.saved.active_profile()
+        self._set_provider_summary(active_profile)
         model_group = QWidget()
         model_box = QHBoxLayout(model_group)
         model_box.setContentsMargins(0, 0, 0, 0)
@@ -893,6 +889,16 @@ class TranslatorWindow(QMainWindow):
             combo._udt_width_handler_connected = True
         update_width(combo.currentText())
 
+    def _set_provider_summary(self, profile, model=None):
+        model = str(model or profile.model).strip()
+        label = f"{profile.name} · {model}" if model else profile.name
+        self.model_combo.blockSignals(True)
+        self.model_combo.clear()
+        self.model_combo.addItem(label, model)
+        self.model_combo.setCurrentIndex(0)
+        self.model_combo.setToolTip(label)
+        self.model_combo.blockSignals(False)
+
     @staticmethod
     def _populate_language_combo(combo, allow_auto, selected):
         combo.blockSignals(True)
@@ -922,19 +928,8 @@ class TranslatorWindow(QMainWindow):
         self._populate_language_combo(self.source_combo, True, source)
         self._populate_language_combo(self.target_combo, False, target)
 
-        model_data = self.model_combo.currentData()
-        custom_model = self.model_combo.currentText()
-        self.model_combo.blockSignals(True)
-        self.model_combo.clear()
-        self.model_combo.addItem(tr("main.model_flash"), "deepseek-v4-flash")
-        self.model_combo.addItem(tr("main.model_pro"), "deepseek-v4-pro")
-        model_index = self.model_combo.findData(model_data)
-        if model_index >= 0:
-            self.model_combo.setCurrentIndex(model_index)
-        else:
-            self.model_combo.setCurrentText(custom_model)
-        self.model_combo.blockSignals(False)
-        self.model_combo.setToolTip(tr("main.model_tooltip"))
+        custom_model = self.model_combo.currentData() or self.model_combo.currentText()
+        self._set_provider_summary(self.saved.active_profile(), custom_model)
 
         headers = (
             tr("main.tasks_count", count=self.table.rowCount()),
@@ -1012,13 +1007,22 @@ class TranslatorWindow(QMainWindow):
         self.output_button.setToolTip(value or tr("main.output_original_tooltip"))
 
     def _open_settings(self):
-        dialog = SettingsDialog(self.saved, self.api_key, self.save_key_enabled, self)
+        active = self.saved.active_profile()
+        active.model = self.model_combo.currentData() or self.model_combo.currentText().strip() or active.model
+        self.saved.provider_profiles = [
+            active.to_dict() if item.id == active.id else item.to_dict()
+            for item in self.saved.profiles()
+        ]
+        dialog = SettingsDialog(self.saved, self.api_keys, self.save_key_enabled, self)
         if not dialog.exec():
             return
         values = dialog.values()
         self.saved.ui_language = values["ui_language"]
-        self.api_key = values["api_key"]
+        self.api_keys = values["api_keys"]
         self.save_key_enabled = values["save_key"]
+        self.saved.provider_profiles = values["provider_profiles"]
+        self.saved.active_provider_id = values["active_provider_id"]
+        self.saved.fallback_provider_id = values["fallback_provider_id"]
         self.saved.glossary_path = values["glossary_path"]
         self.saved.pure_target_language = values["pure_target_language"]
         self.saved.quality_review = values["quality_review"]
@@ -1028,15 +1032,17 @@ class TranslatorWindow(QMainWindow):
         self.saved.pdf_mode = values["pdf_mode"]
         self.saved.pdf_output = values["pdf_output"]
         self.saved.babeldoc_path = values["babeldoc_path"]
-        self.saved.model = self.model_combo.currentData() or self.model_combo.currentText().strip()
+        active = self.saved.active_profile()
+        self.saved.model = active.model
+        self._set_provider_summary(active)
         self.saved.source_language = self.source_combo.currentData()
         self.saved.target_language = self.target_combo.currentData()
         self.saved.output_dir = self.output_edit.text().strip()
         self.config_store.save(self.saved)
-        if self.save_key_enabled and self.api_key:
-            self.secret_store.save(self.api_key)
+        if self.save_key_enabled:
+            self.provider_secret_store.save_all(self.api_keys)
         else:
-            self.secret_store.clear()
+            self.provider_secret_store.clear()
         set_language(self.saved.ui_language)
         self._retranslate_ui()
         self.status.setText(tr("status.settings_saved"))
@@ -1447,11 +1453,14 @@ class TranslatorWindow(QMainWindow):
                 tr("dialog.no_pending_message"),
             )
             return
-        key = self.api_key.strip()
-        if not key:
+        profile = self.saved.active_profile()
+        profile.model = self.model_combo.currentData() or self.model_combo.currentText().strip() or profile.model
+        key = self.api_keys.get(profile.id, "").strip()
+        if profile.preset.requires_api_key and not key:
             self._open_settings()
-            key = self.api_key.strip()
-        if not key:
+            profile = self.saved.active_profile()
+            key = self.api_keys.get(profile.id, "").strip()
+        if profile.preset.requires_api_key and not key:
             QMessageBox.warning(
                 self,
                 tr("dialog.missing_api_title"),
@@ -1461,14 +1470,18 @@ class TranslatorWindow(QMainWindow):
         output = Path(self.output_edit.text()) if self.output_edit.text().strip() else None
         glossary = Path(self.saved.glossary_path) if self.saved.glossary_path.strip() else None
         source, target = self.source_combo.currentData(), self.target_combo.currentData()
-        model = self.model_combo.currentData() or self.model_combo.currentText().strip()
+        model = profile.model
         self.saved.model = model
+        self.saved.provider_profiles = [
+            profile.to_dict() if item.id == profile.id else item.to_dict()
+            for item in self.saved.profiles()
+        ]
         self.saved.source_language = source
         self.saved.target_language = target
         self.saved.output_dir = str(output or "")
         self.config_store.save(self.saved)
-        if self.save_key_enabled: self.secret_store.save(key)
-        else: self.secret_store.clear()
+        if self.save_key_enabled: self.provider_secret_store.save_all(self.api_keys)
+        else: self.provider_secret_store.clear()
         options = TranslationOptions(
             source, target, model, output_dir=output, glossary_path=glossary,
             batch_size=self.saved.batch_size,
@@ -1517,26 +1530,40 @@ class TranslatorWindow(QMainWindow):
         self._refresh_progress_text()
         threading.Thread(
             target=self._worker,
-            args=(self.run_queue, key, options),
+            args=(self.run_queue, profile, options),
             daemon=True,
         ).start()
 
-    def _worker(self, run_queue, key, options):
+    def _worker(self, run_queue, profile, options):
         try:
             # Heavy document libraries are deliberately imported only after the
             # user starts a task. This keeps normal application startup fast.
             from .cache import TranslationCache
-            from .deepseek import DeepSeekTranslator
+            from .deepseek import DeepSeekTranslator, FallbackTranslator
             from .pipeline import TranslationPipeline, write_report
             from .text_utils import load_glossary
 
-            translator = DeepSeekTranslator(
-                key, options.model, options.source_language, options.target_language,
-                load_glossary(options.glossary_path), TranslationCache(), options.request_timeout, options.batch_size,
+            common = dict(
+                source_language=options.source_language,
+                target_language=options.target_language,
+                glossary=load_glossary(options.glossary_path),
+                cache=TranslationCache(), timeout=options.request_timeout, batch_size=options.batch_size,
                 pure_target_language=options.pure_target_language,
                 quality_review=options.quality_review,
                 force_refresh=options.force_refresh,
             )
+            primary = DeepSeekTranslator.from_profile(
+                profile, self.api_keys.get(profile.id, ""), **common
+            )
+            fallback_profile = self.saved.fallback_profile()
+            fallback = None
+            if fallback_profile and fallback_profile.id != profile.id:
+                fallback = DeepSeekTranslator.from_profile(
+                    fallback_profile,
+                    self.api_keys.get(fallback_profile.id, ""),
+                    **common,
+                )
+            translator = FallbackTranslator(primary, fallback)
             pipeline = TranslationPipeline()
             pipeline.begin_dynamic_batch()
             results = []
