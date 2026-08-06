@@ -8,7 +8,9 @@ from pathlib import Path
 
 import fitz
 
+from ..i18n import tr
 from ..models import FileResult, ProgressCallback, TranslationOptions
+from ..pdf_quality import analyze_pdf_quality
 from ..text_utils import is_translatable, normalize_text
 from .pdf_engine import PdfEngine, _rgb, _rotation
 
@@ -30,15 +32,85 @@ def _containing_region(
     return min(matches, key=lambda region: region.get_area()) if matches else None
 
 
-def _aligned_bullet(rect: fitz.Rect, bullets: list[fitz.Rect]) -> bool:
+def _matching_bullet_rect(
+    rect: fitz.Rect,
+    bullets: list[fitz.Rect],
+) -> fitz.Rect | None:
     center_y = (rect.y0 + rect.y1) / 2
-    return any(
-        bullet.x1 <= rect.x0 + 4.0
-        and rect.x0 - bullet.x1 <= 32.0
-        and abs((bullet.y0 + bullet.y1) / 2 - center_y)
-        <= max(rect.height, bullet.height) * 0.7
-        for bullet in bullets
+    return next(
+        (
+            bullet
+            for bullet in bullets
+            if bullet.x1 <= rect.x0 + 4.0
+            and rect.x0 - bullet.x1 <= 32.0
+            and abs((bullet.y0 + bullet.y1) / 2 - center_y)
+            <= max(rect.height, bullet.height) * 0.7
+        ),
+        None,
     )
+
+
+def _uses_table_cell_boundaries(table) -> bool:
+    """Reject sparse pseudo-tables formed by notice icons and text rows."""
+
+    rows = int(getattr(table, "row_count", 0) or 0)
+    columns = int(getattr(table, "col_count", 0) or 0)
+    if rows <= 0 or columns < 2:
+        return False
+    populated = sum(cell is not None for cell in getattr(table, "cells", ()))
+    if populated / max(rows * columns, 1) < 0.65:
+        return False
+    bbox = fitz.Rect(getattr(table, "bbox", (0, 0, 0, 0)))
+    cells = [
+        fitz.Rect(cell)
+        for cell in getattr(table, "cells", ())
+        if cell is not None
+    ]
+    # Notice boxes are often detected as three columns: a 4 pt left border,
+    # one text column occupying almost the complete width, and a 4 pt right
+    # border. Their horizontal rules then appear as separate "cells", which
+    # splits one paragraph into independently translated fragments.
+    if (
+        columns <= 3
+        and bbox.width > 0
+        and any(cell.width / bbox.width >= 0.75 for cell in cells)
+    ):
+        return False
+    return True
+
+
+def _line_span_groups(
+    spans: list[dict],
+    table_regions: list[fitz.Rect],
+) -> list[list[dict]]:
+    """Split a PDF text line when its spans belong to different table cells.
+
+    Some generators expose a complete visual table row as one text line. If
+    that row is redacted as a single translation unit, translating one header
+    can erase untranslatable product codes in neighboring cells. Outside a
+    real multi-cell row, retain the original line grouping.
+    """
+
+    if len(spans) <= 1 or not table_regions:
+        return [spans]
+    labelled: list[tuple[tuple[float, float, float, float] | None, dict]] = []
+    for span in spans:
+        region = _containing_region(fitz.Rect(span["bbox"]), table_regions)
+        key = tuple(region) if region is not None else None
+        labelled.append((key, span))
+    distinct_regions = {key for key, _span in labelled if key is not None}
+    if len(distinct_regions) <= 1:
+        return [spans]
+
+    groups: list[list[dict]] = []
+    previous_key: tuple[float, float, float, float] | None | object = object()
+    for key, span in labelled:
+        if not groups or key != previous_key:
+            groups.append([span])
+        else:
+            groups[-1].append(span)
+        previous_key = key
+    return groups
 
 
 class _PagewiseTranslator:
@@ -59,14 +131,200 @@ class _PagewiseTranslator:
 class AdaptivePdfEngine(PdfEngine):
     """Preserve tables and fixed regions while grouping wrapped body prose."""
 
+    @staticmethod
+    def _same_application_flow(previous: dict, current: dict) -> bool:
+        previous_rect = fitz.Rect(previous["rect"])
+        current_rect = fitz.Rect(current["rect"])
+        return (
+            previous.get("block") == current.get("block")
+            and previous.get("block") is not None
+            and not previous.get("header")
+            and not current.get("header")
+            and previous.get("color") == current.get("color")
+            # Headings and the prose immediately below them are frequently
+            # emitted in the same PDF text block. Flowing a bold heading into
+            # its regular-weight body discards the style boundary and can
+            # make their translated baselines collide.
+            and bool(previous.get("bold")) == bool(current.get("bold"))
+            and previous.get("rotate") == current.get("rotate") == 0
+            and previous.get("table") == current.get("table")
+            and previous.get("container_rect") == current.get("container_rect")
+            and current_rect.y0 >= previous_rect.y0 + 0.5
+            and current_rect.y0 - previous_rect.y1
+            <= max(12.0, previous_rect.height, current_rect.height)
+        )
+
+    def _coalesce_application_lines(
+        self,
+        lines: list[dict],
+        translations: list[str],
+    ) -> tuple[list[dict], list[str]]:
+        """Share vertical space between structured runs from one source block.
+
+        Some PDF producers store a warning-box list and its following
+        paragraphs in one text block. Keeping every logical item in its own
+        narrow source-height rectangle forces each item down to 5.5pt even
+        though the complete block has enough room. Translation remains
+        segment-based for cache quality; only final insertion is flowed.
+        """
+
+        rendered_lines: list[dict] = []
+        rendered_translations: list[str] = []
+        index = 0
+        while index < len(lines):
+            end = index + 1
+            while end < len(lines) and self._same_application_flow(
+                lines[end - 1],
+                lines[end],
+            ):
+                end += 1
+            run_lines = lines[index:end]
+            run_translations = translations[index:end]
+            if len(run_lines) == 1:
+                rendered_lines.append(run_lines[0])
+                rendered_translations.append(run_translations[0])
+                index = end
+                continue
+
+            base_x = min(fitz.Rect(line["rect"]).x0 for line in run_lines)
+            source_rect = fitz.Rect(run_lines[0]["rect"])
+            redact_rect = fitz.Rect(
+                run_lines[0].get("redact_rect", run_lines[0]["rect"])
+            )
+            fit_rect = fitz.Rect(
+                run_lines[0].get("fit_rect", run_lines[0]["rect"])
+            )
+            prepared_parts: list[tuple[dict, str, int]] = []
+            for line, translated in zip(
+                run_lines,
+                run_translations,
+                strict=True,
+            ):
+                line_rect = fitz.Rect(line["rect"])
+                source_rect |= line_rect
+                redact_rect |= fitz.Rect(
+                    line.get("redact_rect", line["rect"])
+                )
+                line_fit = fitz.Rect(line.get("fit_rect", line["rect"]))
+                fit_rect.x1 = max(fit_rect.x1, line_fit.x1)
+                fit_rect.y1 = max(fit_rect.y1, line_fit.y1)
+                clean = self._clean_translation(line, translated)
+                average_character_width = max(2.5, float(line["size"]) * 0.48)
+                indent = min(
+                    20,
+                    max(
+                        0,
+                        round(
+                            (line_rect.x0 - base_x)
+                            / average_character_width
+                        ),
+                    ),
+                )
+                prepared_parts.append((line, clean, indent))
+
+            prepared: list[str] = []
+            for line, clean, indent in prepared_parts:
+                raw_bullet_rect = line.get("bullet_rect")
+                bullet_rect = (
+                    fitz.Rect(raw_bullet_rect)
+                    if raw_bullet_rect is not None
+                    else None
+                )
+                # Standalone/inline source bullets normally remain outside
+                # their own text redaction. A flowed block can widen that
+                # redaction across a later bullet, though; redraw only bullets
+                # that the combined rectangle actually erased. This avoids
+                # the duplicate "• ◆" marker seen in notice-box lists.
+                bullet_was_redacted = (
+                    line.get("starts_bullet")
+                    and (
+                        bullet_rect is None
+                        or redact_rect.contains(
+                            fitz.Point(
+                                (bullet_rect.x0 + bullet_rect.x1) / 2,
+                                (bullet_rect.y0 + bullet_rect.y1) / 2,
+                            )
+                        )
+                    )
+                )
+                bullet = "◆ " if bullet_was_redacted else ""
+                prepared.append((" " * indent) + bullet + clean)
+
+            combined = dict(run_lines[0])
+            combined["text"] = "\n".join(
+                str(line.get("text", ""))
+                for line in run_lines
+            )
+            combined["rect"] = source_rect
+            combined["redact_rect"] = redact_rect
+            combined["fit_rect"] = fitz.Rect(
+                base_x,
+                source_rect.y0,
+                fit_rect.x1,
+                fit_rect.y1,
+            )
+            combined["size"] = max(
+                float(line.get("size", 9))
+                for line in run_lines
+            )
+            # PyMuPDF's default 1.0 textbox line height is tighter than the
+            # actual CJK font ascent/descent box. Reserve enough leading for
+            # wrapped Chinese so adjacent lines cannot paint over each other.
+            combined["lineheight"] = (
+                1.0 if combined.get("table") else 1.25
+            )
+            combined["strip_generated_bullet"] = False
+            rendered_lines.append(combined)
+            rendered_translations.append("\n".join(prepared))
+            index = end
+        return rendered_lines, rendered_translations
+
+    def _apply_page_translations(
+        self,
+        page,
+        page_index: int,
+        lines: list[dict],
+        translations: list[str],
+        options: TranslationOptions,
+        result: FileResult,
+    ) -> None:
+        rendered_lines, rendered_translations = (
+            self._coalesce_application_lines(lines, translations)
+        )
+        super()._apply_page_translations(
+            page,
+            page_index,
+            rendered_lines,
+            rendered_translations,
+            options,
+            result,
+        )
+
     def _page_lines(self, page) -> list[dict]:
         try:
-            table_regions = [
-                fitz.Rect(table.bbox)
-                for table in page.find_tables().tables
-            ]
+            table_regions: list[fitz.Rect] = []
+            table_cells: list[fitz.Rect] = []
+            for table in page.find_tables().tables:
+                # Cell rectangles must precede the outer table rectangle for
+                # genuine multi-column tables so _containing_region selects
+                # the smallest valid boundary. Single-column safety/notice
+                # boxes are frequently misdetected as one table row per text
+                # line; treating those rows as cells forces every translation
+                # down to a tiny font. Keep only their shared outer boundary.
+                if _uses_table_cell_boundaries(table):
+                    detected_cells = [
+                        fitz.Rect(cell)
+                        for cell in table.cells
+                        if cell is not None
+                    ]
+                    table_cells.extend(detected_cells)
+                    table_regions.extend(detected_cells)
+                # Even a sparse notice grid provides a useful shared outer
+                # boundary. Only its individual pseudo-cells are ignored.
+                table_regions.append(fitz.Rect(table.bbox))
         except Exception:
             table_regions = []
+            table_cells = []
 
         data = page.get_text("dict", flags=fitz.TEXTFLAGS_TEXT)
         bullets: list[fitz.Rect] = []
@@ -85,84 +343,131 @@ class AdaptivePdfEngine(PdfEngine):
             if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
-                spans = line.get("spans", [])
-                if not spans:
+                raw_spans = line.get("spans", [])
+                if not raw_spans:
                     continue
-                raw_text = normalize_text(
-                    "".join(span.get("text", "") for span in spans)
-                )
-                if not raw_text or STANDALONE_BULLET_RE.match(raw_text):
-                    continue
+                for spans in _line_span_groups(raw_spans, table_regions):
+                    raw_text = normalize_text(
+                        "".join(span.get("text", "") for span in spans)
+                    )
+                    if not raw_text or STANDALONE_BULLET_RE.match(raw_text):
+                        continue
 
-                inline_bullet = bool(INLINE_BULLET_RE.match(raw_text))
-                text = INLINE_BULLET_RE.sub("", raw_text, count=1).lstrip()
-                if not is_translatable(text):
-                    continue
-                translatable_spans = [
-                    span
-                    for span in spans
-                    if is_translatable(normalize_text(span.get("text", "")))
-                ]
-                dominant = max(
-                    translatable_spans or spans,
-                    key=lambda span: len(span.get("text", "")),
-                )
-                original_rect = fitz.Rect(line["bbox"])
-                rect = fitz.Rect(original_rect)
-                redact_rect = fitz.Rect(original_rect)
-                if translatable_spans:
-                    first_span = translatable_spans[0]
-                    first_rect = fitz.Rect(first_span["bbox"])
-                    # Section numbers are sometimes vector glyphs or separate
-                    # non-translatable spans. Start at the first actual title
-                    # glyph so the number remains untouched.
-                    rect.x0 = max(rect.x0, first_rect.x0)
-                    redact_rect.x0 = max(redact_rect.x0, first_rect.x0)
-                    if str(first_span.get("text", "")).startswith((" ", "\t")):
-                        rect.x0 = min(
-                            rect.x1,
-                            rect.x0 + float(dominant.get("size", 9)) * 0.85,
+                    inline_bullet = bool(INLINE_BULLET_RE.match(raw_text))
+                    text = INLINE_BULLET_RE.sub("", raw_text, count=1).lstrip()
+                    if not is_translatable(text):
+                        continue
+                    translatable_spans = [
+                        span
+                        for span in spans
+                        if is_translatable(
+                            normalize_text(span.get("text", ""))
                         )
-                    elif not inline_bullet and first_rect.x0 - original_rect.x0 > 4.0:
-                        rect.x0 = min(rect.x1, rect.x0 + 2.5)
-                if (
-                    inline_bullet
-                    and translatable_spans
-                    and INLINE_BULLET_RE.match(
-                        normalize_text(translatable_spans[0].get("text", ""))
+                    ]
+                    dominant = max(
+                        translatable_spans or spans,
+                        key=lambda span: len(span.get("text", "")),
                     )
-                ):
-                    redact_rect.x0 = min(
-                        redact_rect.x1,
-                        redact_rect.x0 + min(18.0, dominant.get("size", 9) * 1.6),
-                    )
-                    rect.x0 = min(rect.x1, rect.x0 + min(18.0, dominant.get("size", 9) * 1.6))
-                if rect.is_empty or rect.width < 0.5 or rect.height < 0.5:
-                    continue
+                    original_rect = fitz.Rect(spans[0]["bbox"])
+                    for span in spans[1:]:
+                        original_rect |= fitz.Rect(span["bbox"])
+                    rect = fitz.Rect(original_rect)
+                    redact_rect = fitz.Rect(original_rect)
+                    if translatable_spans:
+                        first_span = translatable_spans[0]
+                        first_rect = fitz.Rect(first_span["bbox"])
+                        # Section numbers are sometimes vector glyphs or
+                        # separate non-translatable spans. Start at the first
+                        # actual title glyph so the number remains untouched.
+                        rect.x0 = max(rect.x0, first_rect.x0)
+                        redact_rect.x0 = max(redact_rect.x0, first_rect.x0)
+                        if str(first_span.get("text", "")).startswith(
+                            (" ", "\t")
+                        ):
+                            rect.x0 = min(
+                                rect.x1,
+                                rect.x0
+                                + float(dominant.get("size", 9)) * 0.85,
+                            )
+                        elif (
+                            not inline_bullet
+                            and first_rect.x0 - original_rect.x0 > 4.0
+                        ):
+                            rect.x0 = min(rect.x1, rect.x0 + 2.5)
+                    if (
+                        inline_bullet
+                        and translatable_spans
+                        and INLINE_BULLET_RE.match(
+                            normalize_text(
+                                translatable_spans[0].get("text", "")
+                            )
+                        )
+                    ):
+                        bullet_gap = min(
+                            18.0,
+                            dominant.get("size", 9) * 1.6,
+                        )
+                        redact_rect.x0 = min(
+                            redact_rect.x1,
+                            redact_rect.x0 + bullet_gap,
+                        )
+                        rect.x0 = min(rect.x1, rect.x0 + bullet_gap)
+                    if rect.is_empty or rect.width < 0.5 or rect.height < 0.5:
+                        continue
 
-                flags = int(dominant.get("flags", 0))
-                container_rect = _containing_region(rect, table_regions)
-                atoms.append(
-                    {
-                        "text": text,
-                        "rect": rect,
-                        "redact_rect": redact_rect,
-                        "size": float(dominant.get("size", 9)),
-                        "color": _rgb(dominant.get("color", 0)),
-                        "rotate": _rotation(line.get("dir")),
-                        "align": 0,
-                        "block": block_index,
-                        "bold": bool(flags & fitz.TEXT_FONT_BOLD),
-                        "table": container_rect is not None,
-                        "container_rect": container_rect,
-                        "header": (
-                            rect.y0
-                            < page.cropbox.y0 + page.cropbox.height * 0.10
-                        ),
-                        "starts_bullet": inline_bullet or _aligned_bullet(rect, bullets),
-                        "strip_generated_bullet": True,
-                    }
-                )
+                    aligned_bullet_rect = _matching_bullet_rect(rect, bullets)
+                    if inline_bullet and redact_rect.x0 > original_rect.x0:
+                        bullet_rect = fitz.Rect(
+                            original_rect.x0,
+                            original_rect.y0,
+                            redact_rect.x0,
+                            original_rect.y1,
+                        )
+                    else:
+                        bullet_rect = aligned_bullet_rect
+
+                    flags = int(dominant.get("flags", 0))
+                    container_rect = _containing_region(rect, table_regions)
+                    table_cell_rect = _containing_region(rect, table_cells)
+                    source_size = float(dominant.get("size", 9))
+                    table_size = (
+                        max(5.5, source_size * 0.92)
+                        if table_cell_rect is not None and source_size >= 5.5
+                        else source_size
+                    )
+                    atoms.append(
+                        {
+                            "text": text,
+                            "rect": rect,
+                            "redact_rect": redact_rect,
+                            "size": table_size,
+                            "color": _rgb(dominant.get("color", 0)),
+                            "rotate": _rotation(line.get("dir")),
+                            "align": 0,
+                            "block": block_index,
+                            "bold": bool(flags & fitz.TEXT_FONT_BOLD),
+                            "table": table_cell_rect is not None,
+                            "container_rect": container_rect,
+                            # Dense engineering cells are often only one Latin
+                            # line high. Preserve their compact leading; body
+                            # prose receives the safer CJK line height.
+                            "lineheight": (
+                                1.0
+                                if table_cell_rect is not None
+                                else 1.25
+                            ),
+                            "header": (
+                                rect.y0
+                                < page.cropbox.y0 + page.cropbox.height * 0.10
+                            ),
+                            "starts_bullet": (
+                                inline_bullet
+                                or aligned_bullet_rect is not None
+                            ),
+                            "bullet_rect": bullet_rect,
+                            "strip_generated_bullet": True,
+                        }
+                    )
 
         groups: list[dict] = []
         for atom in atoms:
@@ -189,7 +494,15 @@ class AdaptivePdfEngine(PdfEngine):
             can_merge = (
                 not atom["header"]
                 and not previous["header"]
+                # A source paragraph can wrap across several lines inside one
+                # PDF text block. Adjacent table-of-contents rows and list
+                # entries are commonly stored as separate blocks even when
+                # their geometry, font, and colour are identical. Crossing
+                # that boundary collapses structured pages into one paragraph.
+                and atom["block"] == previous["block"]
+                and atom["color"] == previous["color"]
                 and atom["table"] == previous["table"]
+                and atom.get("container_rect") == previous.get("container_rect")
                 and not atom["starts_bullet"]
                 and atom["rotate"] == previous["rotate"] == 0
                 and close_vertically
@@ -230,6 +543,11 @@ class AdaptivePdfEngine(PdfEngine):
                     right = min(right, other.x0 - 4.0)
             right = max(rect.x1, right)
             bottom = page_bottom
+            if container_rect is not None:
+                bottom = min(
+                    bottom,
+                    fitz.Rect(container_rect).y1 - 2.0,
+                )
             for other in visual_rects:
                 if other.y0 < rect.y1 - 0.5:
                     continue
@@ -260,15 +578,33 @@ def replace_pdf_pages(
     translated_path: Path,
     repaired_path: Path,
     page_numbers: list[int],
+    *,
+    repair_page_indices: list[int] | None = None,
 ) -> None:
     translated = fitz.open(translated_path)
     repaired = fitz.open(repaired_path)
     try:
-        if repaired.page_count != len(page_numbers):
+        if repair_page_indices is None:
+            repair_page_indices = list(range(len(page_numbers)))
+            expected_page_count = len(page_numbers)
+        else:
+            expected_page_count = None
+        if len(repair_page_indices) != len(page_numbers):
             raise ValueError(
-                f"Repair page count mismatch: {repaired.page_count} != {len(page_numbers)}"
+                "Repair page mapping mismatch: "
+                f"{len(repair_page_indices)} != {len(page_numbers)}"
             )
-        for repair_index, page_number in enumerate(page_numbers):
+        if expected_page_count is not None and repaired.page_count != expected_page_count:
+            raise ValueError(
+                f"Repair page count mismatch: {repaired.page_count} != {expected_page_count}"
+            )
+        for repair_index, page_number in zip(
+            repair_page_indices,
+            page_numbers,
+            strict=True,
+        ):
+            if repair_index < 0 or repair_index >= repaired.page_count:
+                raise ValueError(f"Invalid repaired page index: {repair_index}")
             page = translated[page_number - 1]
             page.add_redact_annot(page.rect, fill=(1, 1, 1), cross_out=False)
             page.apply_redactions(images=2, graphics=2, text=0)
@@ -384,7 +720,76 @@ def repair_pdf_pages(
         )
         if result.status != "completed":
             return result
-        replace_pdf_pages(translated_path, selected_output, ordered_pages)
+        failed_repair_indices = {
+            page_number - 1
+            for page_number in result.skipped_pages
+            if 1 <= page_number <= len(ordered_pages)
+        }
+        try:
+            repaired_quality = analyze_pdf_quality(
+                selected_source,
+                selected_output,
+                render_scale=1.5,
+            )
+            failed_repair_indices.update(
+                page_number - 1
+                for page_number in repaired_quality.repair_pages
+            )
+            if repaired_quality.repair_pages:
+                result.warnings.append(
+                    tr(
+                        "warning.pdf_quality_residual",
+                        count=len(repaired_quality.repair_pages),
+                        pages=", ".join(
+                            str(ordered_pages[page_number - 1])
+                            for page_number
+                            in repaired_quality.repair_pages
+                        ),
+                    )
+                )
+        except Exception as verification_error:
+            # A repair is a fallback, never a reason to replace a readable
+            # smart-layout page with an unverified rewrite.
+            failed_repair_indices.update(range(len(ordered_pages)))
+            result.warnings.append(
+                tr(
+                    "warning.pdf_quality_scan_failed",
+                    reason=verification_error,
+                )
+            )
+        successful_entries = [
+            (repair_index, original_page)
+            for repair_index, original_page in enumerate(ordered_pages)
+            if repair_index not in failed_repair_indices
+        ]
+        successful_pages = [page for _, page in successful_entries]
+        failed_pages = [
+            original_page
+            for repair_index, original_page in enumerate(ordered_pages)
+            if repair_index in failed_repair_indices
+        ]
+        result.usage = dict(result.usage)
+        result.usage["repaired_pages"] = successful_pages
+        result.usage["failed_pages"] = failed_pages
+        result.skipped_pages = failed_pages
+        if not successful_entries:
+            # Never replace a smart-layout page with a repair that already
+            # lost one or more text groups. Failure is now isolated per page,
+            # so a bad page does not discard valid repairs from the same run.
+            result.status = "failed"
+            result.errors.append(
+                "; ".join(result.warnings)
+                or f"{result.skipped_units} repair text groups did not fit"
+            )
+            return result
+        replace_pdf_pages(
+            translated_path,
+            selected_output,
+            successful_pages,
+            repair_page_indices=[
+                repair_index for repair_index, _ in successful_entries
+            ],
+        )
         result.input_path = str(source_path)
         result.output_path = str(translated_path)
         result.engine = "PDF adaptive repair"

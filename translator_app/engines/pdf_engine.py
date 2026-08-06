@@ -23,6 +23,10 @@ LEADING_LATIN_FRAGMENT_RE = re.compile(
     r"^([A-Za-z]{1,3})\s*(?=[\u3400-\u9fff])"
 )
 SOURCE_LATIN_WORD_RE = re.compile(r"^[A-Za-z]+")
+INTERNAL_SEGMENT_MARKER_RE = re.compile(
+    r"\[\s*\[\s*UDT\s*[_\s-]*SEGMENT\s*[_\s-]*\d{4}\s*\]\s*\]",
+    re.IGNORECASE,
+)
 
 
 def _rotation(direction) -> int:
@@ -146,7 +150,11 @@ class PdfEngine(TranslationEngine):
                 fontsize=candidate_size,
                 color=line["color"],
                 rotate=rotation,
-                lineheight=1.0,
+                # The bundled CJK font has a taller visible glyph box than
+                # Latin fonts at the same point size. A 1.0 baseline step can
+                # therefore make wrapped Chinese lines visibly overlap even
+                # when insert_textbox reports success.
+                lineheight=float(line.get("lineheight", 1.25)),
             )
             if spare >= -0.05:
                 shape.commit(overlay=True)
@@ -159,6 +167,10 @@ class PdfEngine(TranslationEngine):
     @staticmethod
     def _clean_translation(line: dict, translated: str) -> str:
         text = str(translated).strip().replace("\u2011", "-")
+        # Segment identity markers belong only to the API wire format. Cache
+        # validation evicts polluted entries, but strip them here as a final
+        # safety net so no backend or legacy cache can print one into a PDF.
+        text = INTERNAL_SEGMENT_MARKER_RE.sub("", text)
         # Private-use glyphs in source PDFs are normally symbol-font bullets.
         # They must never leak into a Unicode translation font as empty boxes.
         text = PRIVATE_USE_RE.sub("", text)
@@ -203,13 +215,36 @@ class PdfEngine(TranslationEngine):
                 options.minimum_pdf_font_size,
             )
             if not inserted:
-                result.warnings.append(
-                    tr(
-                        "warning.pdf_text_overflow",
-                        page=page_index + 1,
-                        text=line["text"][:60],
-                    )
+                # A readable original label is safer than either an empty
+                # redaction box or an illegible 2–3 pt translation. This is
+                # particularly important for narrow engineering-table cells
+                # containing units, coating codes and product specifications.
+                source_text = self._clean_translation(line, line["text"])
+                source_inserted, _source_size = self._insert_fitted(
+                    page,
+                    line,
+                    source_text,
+                    options.minimum_pdf_font_size,
                 )
+                if source_inserted:
+                    result.warnings.append(
+                        tr(
+                            "warning.pdf_source_preserved",
+                            page=page_index + 1,
+                            text=line["text"][:60],
+                        )
+                    )
+                else:
+                    result.skipped_units += 1
+                    if page_index + 1 not in result.skipped_pages:
+                        result.skipped_pages.append(page_index + 1)
+                    result.warnings.append(
+                        tr(
+                            "warning.pdf_text_overflow",
+                            page=page_index + 1,
+                            text=line["text"][:60],
+                        )
+                    )
             elif used_size < options.minimum_pdf_font_size:
                 result.warnings.append(
                     tr(

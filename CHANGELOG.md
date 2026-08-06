@@ -4,6 +4,88 @@
 
 This project follows semantic versioning. Stable builds are available from [GitHub Releases](https://github.com/WANG40929/engineering-document-translator/releases).
 
+## 1.4.4
+
+### 中文
+
+- PDF 质检新增连续半字裁切与孤立源文短字母检测，可识别此前漏报的横线遮字、文本框底部裁切以及残留的 `e`、`s` 等字符。
+- 中文正文与提示框采用更安全的行距，粗体标题不再与后续正文错误合并，避免标题、段落和项目符号互相压叠。
+- 修正提示框被识别成三列伪表格的问题，整段说明现在共享完整区域，不再因逐行翻译而出现重复或断裂。
+- 真正的多列表格按单元格拆分、使用适合表格的行距和字号；密集工程表格不再因正常的字形边界接触而被误判重排。
+- 问题页修复后立即进行独立质量复检；仍有裁切、重叠或内容异常的页面自动回滚，绝不覆盖原本更可读的智能排版页。
+- 优化 PDF 质检性能：只在检测到潜在行重叠时分析表格结构，294 页样本的二次扫描时间由约 37 秒缩短到约 16 秒。
+- 使用用户提供的 294 页工程手册复测：33 个真实问题页全部完成重排，整本二次扫描无残留问题页，并目视复核正文、提示框和密集表格代表页。
+
+### English
+
+- Detects continuously half-clipped glyphs and isolated short source-language debris such as `e` or `s`, covering rule-obscured text and textbox-bottom clipping that older scans missed.
+- Uses safer CJK leading and keeps bold headings separate from following body text, preventing headings, paragraphs, and bullets from painting over one another.
+- Stops treating notice panels as narrow three-column pseudo-tables, so each notice paragraph shares its full region without duplicated or fragmented translation.
+- Splits real multi-column rows by cell, applies table-appropriate leading and font sizing, and avoids repairing dense engineering tables solely because normal glyph bounding boxes touch.
+- Revalidates every repaired page before committing it; any page with residual clipping, overlap, or structural damage is rolled back instead of replacing a more readable smart-layout page.
+- Runs expensive table analysis only when potential line overlap is present, reducing the supplied 294-page second-pass scan from about 37 seconds to about 16 seconds.
+- Regressed the supplied 294-page engineering manual: all 33 genuine problem pages were reflowed, the full second scan reported no residual pages, and representative prose, notice, and dense-table pages passed visual inspection.
+
+## 1.4.3
+
+### 中文
+
+- PDF 自适应修复改为逐页提交：单个复杂页失败时，其他已经修复成功的页面不再被整批回滚。
+- 目录、列表和相邻同样式内容严格遵守原 PDF 文本块边界，避免多行内容被错误拼成一个段落。
+- 提示框和稀疏伪表格共享完整可用区域，不再把每一行误判成狭窄单元格；保留真正多列表格的单元格边界。
+- 同一原始文本块内的长段落和项目列表统一分配纵向空间，并避免项目符号丢失或出现“• ◆”双重标记。
+- 无法以可读字号容纳译文的极窄技术单元格会保留原规格文字，避免空白框或 2–3 pt 的不可读文字。
+- 清除并拒绝缓存中的内部 `UDT_SEGMENT` 标记，防止内部段落标识进入最终 PDF。
+- 使用用户提供的 294 页工程手册复测：78 个命中页全部完成修复，二次质量扫描无残留问题页。
+
+### English
+
+- Commits adaptive PDF repairs independently by page, so one difficult page no longer rolls back every successful repair in the batch.
+- Keeps contents rows, lists, and adjacent same-style content separated by their original PDF text-block boundaries.
+- Gives notice boxes and sparse pseudo-tables their full shared region while retaining real cell boundaries for dense multi-column tables.
+- Flows long paragraphs and lists within the same source block, without losing bullets or producing duplicate “• ◆” markers.
+- Preserves readable source specification text in extremely narrow technical cells instead of leaving blanks or forcing 2–3 pt output.
+- Rejects and removes cached internal `UDT_SEGMENT` markers before final PDF generation.
+- Regressed the supplied 294-page engineering manual: all 78 flagged pages repaired and the second quality scan reported no residual pages.
+
+## 1.4.2
+
+### 中文
+
+- 修复智能 PDF 质检的漏报：从整段可见性检查改为逐字检查，可识别只裁掉部分文字或半行文字的情况。
+- 新增文字行重叠与结构行异常合并检测，可发现安全标志说明、项目符号和多栏内容被挤到同一位置的问题。
+- 提示框排版不再合并不同颜色的标题与正文；表格译文严格使用所属单元格边界，不再跨列或跨行。
+- 自适应修复若有任何文字框无法完整写入，将保留原智能排版页，不再用缺字页面覆盖原结果。
+- 使用真实 294 页工程手册进行全量扫描，并以加长中文字符压力样本复检全部问题页；新增相关自动化回归。
+- 同时包含 v1.4.1 的紧急插队与任务表格焦点优化。
+
+### English
+
+- Replaced whole-span visibility checks with per-glyph inspection so partially clipped text and half-hidden lines are detected.
+- Added line-overlap and severe structured-line-collapse detection for safety labels, bullets, and multi-column content.
+- Prevented differently colored notice headings and body text from being merged, and confined table translations to their original cell boundaries.
+- Keeps the original smart-layout page whenever adaptive repair cannot place every text group.
+- Regressed the complete 294-page engineering manual and reran every flagged page with deliberately expanded CJK text.
+- Includes the v1.4.1 urgent-preemption and task-focus improvements.
+
+## 1.4.1
+
+### 中文
+
+- 新增真正的紧急插队：正在翻译时可将等待中或新添加的文件设为紧急任务，当前文件会在安全检查点暂停，紧急文件完成后再从缓存继续。
+- 插队采用协作式暂停：等待正在进行的接口请求结束，并避免在保存成品时强制终止，从而防止损坏输出文件。
+- 紧急任务、暂停中和已暂停状态会在任务列表与底部状态栏明确显示，紧急任务会自动移动到队列前方。
+- 移除任务表格的单元格虚线焦点框，同时保留整行选择和键盘操作。
+- 新增动态任务队列、运行中新文件插入及“原任务—紧急任务—原任务恢复”回归测试。
+
+### English
+
+- Added true urgent preemption: a waiting or newly added file can become urgent while translation is running; the active file pauses at a safe checkpoint and resumes from cache after urgent work completes.
+- Uses cooperative pausing: finishes the in-flight API request and avoids force termination while an output file is being saved.
+- Shows clear urgent, pausing, and paused states in the task list and footer, and moves urgent work to the front automatically.
+- Removed the dotted table-cell focus frame while preserving row selection and keyboard access.
+- Added regressions for the dynamic queue, newly inserted urgent files, and the active–urgent–resume execution order.
+
 ## 1.4.0
 
 ### 中文

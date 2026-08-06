@@ -161,6 +161,10 @@
         <li>任务完成后点击“打开”查看译文，或点击“打开文件夹”定位输出文件。</li>
       </ol>
       <div class="note">
+        <strong>紧急插队：</strong>翻译过程中点击紧急文件右侧的“向上箭头”。软件会在当前接口请求结束后的安全检查点暂停当前文件，
+        先完成紧急文件，再利用缓存继续原文件；为保护成品，正在保存文件时不会被强制中断。
+      </div>
+      <div class="note">
         <strong>推荐：</strong>PDF 模式保持“自动选择”。软件会根据页面内容选择智能排版或原位保版；
         Word、Excel、CSV 不使用 BabelDOC 引擎。
       </div>
@@ -210,7 +214,7 @@
       <h3>自动选择（推荐）</h3>
       <p>正文较多的报告、手册和论文优先使用智能排版；图纸、铭牌和短标签 PDF 优先使用原位保版。完整版找不到智能引擎时会显示明确提示。</p>
       <h3>智能排版</h3>
-      <p>使用 BabelDOC 分析段落、字体和页面结构，再将 DeepSeek 的译文放回页面。适合连续正文。v1.4.0 会在生成后逐页检查文字分布、隐藏或裁切文字和异常小字号；发现问题时只重译并替换相应页面，其余正常页面保持智能排版结果。</p>
+      <p>使用 BabelDOC 分析段落、字体和页面结构，再将 DeepSeek 的译文放回页面。适合连续正文。v1.4.4 会在生成后逐页检查半字裁切、横线遮字、孤立源文残片、文字行重叠、结构行异常合并、文字分布和异常小字号；提示框使用完整可用区域，真正的表格仍保持单元格边界。每个修复页会再次验收，仍有问题就回滚，不会覆盖原本更可读的智能排版页。</p>
       <h3>原位保版</h3>
       <p>尽量在原文字坐标处替换内容。适合工程图纸、表格、铭牌和版面位置不能变化的文件。</p>
       <p>PDF 可以生成纯译文、双语对照，或同时生成两者。图片内部的文字默认不会 OCR 翻译。</p>
@@ -272,6 +276,7 @@
         <li>Choose source language, target language, and output folder, then select Start Translation.</li>
         <li>When complete, use Open File or Open Folder beside the task.</li>
       </ol>
+      <p><strong>Urgent priority:</strong> select the upward arrow beside an urgent file. The application pauses the active file at a safe checkpoint, finishes the urgent file first, then resumes the original file from cache.</p>
       <h3>Editions</h3>
       <ul>
         <li><strong>Setup Full:</strong> recommended; installs the application and bundled BabelDOC smart-PDF engine.</li>
@@ -281,7 +286,7 @@
       <h3>Do not separate runtime folders</h3>
       <p><code>ApplicationFiles</code> is required by the application. The Full edition also requires <code>TranslationEngine</code>. Keep both beside the EXE.</p>
       <h3>PDF modes</h3>
-      <p><strong>Automatic</strong> is recommended. Smart Layout is best for reports and manuals; Strict Layout is best for engineering drawings, labels, and fixed-position content. In v1.4.0, every Smart Layout page is checked after generation; pages with clipped, hidden, collapsed, or unreadably small text are selectively repaired. Image-only text is not OCR-translated by default.</p>
+      <p><strong>Automatic</strong> is recommended. Smart Layout is best for reports and manuals; Strict Layout is best for engineering drawings, labels, and fixed-position content. In v1.4.4, every Smart Layout page is checked for half-clipped glyphs, rule-obscured text, isolated source fragments, overlapping lines, collapsed structures, abnormal distribution, and unreadably small text. Notice regions use their full available area, real tables remain cell-bounded, and every repair is rescanned and rolled back if it is less readable than the Smart Layout page. Image-only text is not OCR-translated by default.</p>
       <h3>Glossaries and cache</h3>
       <p>The selected CSV, TSV, TXT, or XLSX glossary is remembered and reused. v1.4.0 does not automatically build a permanent terminology library. Translation cache is capped at 100 MB and is not a terminology database. Version 1.4.0 does not reuse v1.3.x cache mappings, preventing potentially misaligned older results from entering repaired PDFs.</p>
       <h3>Install BabelDOC for the Lite edition</h3>

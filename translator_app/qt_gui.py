@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
     QMenu, QMessageBox, QProgressBar, QPushButton, QSplashScreen, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QStyle, QStyledItemDelegate, QStyleOptionViewItem, QVBoxLayout, QWidget,
 )
 
 from . import __version__
@@ -23,6 +23,7 @@ from .i18n import get_language, set_language, tr
 from .models import TranslationOptions
 from .secret_store import SecretStore
 from .settings_dialog import SettingsDialog
+from .task_queue import PreemptiveTaskQueue
 
 
 DOCUMENT_LANGUAGE_KEYS = {
@@ -51,6 +52,8 @@ def _ui_font_family() -> str:
 
 class Bridge(QObject):
     progress = Signal(str, float, str)
+    file_done = Signal(object)
+    preempted = Signal(str)
     done = Signal(object, str)
     error = Signal(str)
     stopped = Signal()
@@ -58,6 +61,10 @@ class Bridge(QObject):
 
 class TranslationStopped(Exception):
     """Internal signal used to stop a running batch between API operations."""
+
+
+class TranslationPreempted(Exception):
+    """Internal signal used to pause one file at a safe progress checkpoint."""
 
 
 class TitleBar(QFrame):
@@ -217,25 +224,41 @@ class IconButton(QPushButton):
             folder.quadTo(7.5, 28, 7.5, 25.5)
             folder.closeSubpath()
             p.drawPath(folder)
+        elif self.kind == "priority":
+            # Move-to-front symbol: an arrow pointing toward a queue boundary.
+            line(9, 8.5, 27, 8.5)
+            line(18, 27, 18, 12)
+            line(18, 12, 12.5, 17.5)
+            line(18, 12, 23.5, 17.5)
 
 
 class OperationCell(QWidget):
-    """Actions for one task: open output, open its folder, or remove the row."""
+    """Actions for one task: prioritize, open output/folder, or remove."""
 
-    def __init__(self, open_callback, folder_callback, remove_callback, parent=None):
+    def __init__(
+        self,
+        priority_callback,
+        open_callback,
+        folder_callback,
+        remove_callback,
+        parent=None,
+    ):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 0, 2, 0)
         layout.setSpacing(2)
+        self.priority_button = IconButton("priority")
         self.open_button = IconButton("open")
         self.folder_button = IconButton("folder")
         self.remove_button = IconButton("trash")
         self.retranslate()
+        self.priority_button.clicked.connect(priority_callback)
         self.open_button.clicked.connect(open_callback)
         self.folder_button.clicked.connect(folder_callback)
         self.remove_button.clicked.connect(remove_callback)
         self.open_button.setEnabled(False)
         self.folder_button.setEnabled(False)
+        layout.addWidget(self.priority_button)
         layout.addWidget(self.open_button)
         layout.addWidget(self.folder_button)
         layout.addWidget(self.remove_button)
@@ -244,7 +267,19 @@ class OperationCell(QWidget):
         self.open_button.setEnabled(available)
         self.folder_button.setEnabled(available)
 
+    def set_task_status(self, status: str):
+        self.priority_button.setEnabled(
+            status not in {
+                "completed",
+                "processing",
+                "translating",
+                "pausing",
+                "unsupported",
+            }
+        )
+
     def retranslate(self):
+        self.priority_button.setToolTip(tr("common.priority_tooltip"))
         self.open_button.setToolTip(tr("common.open_file"))
         self.folder_button.setToolTip(tr("common.open_folder"))
         self.remove_button.setToolTip(tr("common.remove"))
@@ -313,6 +348,16 @@ class FileDropTable(QTableWidget):
             event.acceptProposedAction()
         else:
             event.ignore()
+
+
+class NoFocusRectDelegate(QStyledItemDelegate):
+    """Keep row selection while suppressing Qt's dotted current-cell frame."""
+
+    def paint(self, painter, option, index):
+        clean_option = QStyleOptionViewItem(option)
+        clean_option.state &= ~QStyle.State_HasFocus
+        super().paint(painter, clean_option, index)
+
 
 class DropZone(QFrame):
     files_dropped = Signal(list)
@@ -475,8 +520,11 @@ class StatusCell(QWidget):
     COLORS = {
         "pending": "#98a2b3",
         "queued": "#98a2b3",
+        "priority": "#315fa8",
         "translating": "#1f67e8",
         "processing": "#1f67e8",
+        "pausing": "#315fa8",
+        "paused": "#66758b",
         "completed": "#16865c",
         "failed": "#d14343",
         "unsupported": "#d14343",
@@ -527,8 +575,13 @@ class TranslatorWindow(QMainWindow):
         self.save_key_enabled = bool(self.api_key)
         self.outputs_by_input: dict[str, list[Path]] = {}
         self.active_run_paths: list[str] = []
+        self.run_queue: PreemptiveTaskQueue | None = None
+        self._preempt_lock = threading.Lock()
+        self._preempt_path: str | None = None
         self.bridge = Bridge()
         self.bridge.progress.connect(self._on_progress)
+        self.bridge.file_done.connect(self._on_file_done)
+        self.bridge.preempted.connect(self._on_preempted)
         self.bridge.done.connect(self._on_done)
         self.bridge.error.connect(self._on_error)
         self.bridge.stopped.connect(self._on_stopped)
@@ -697,6 +750,7 @@ class TranslatorWindow(QMainWindow):
         self.table.files_dropped.connect(self._handle_dropped)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setItemDelegate(NoFocusRectDelegate(self.table))
         self.table.setShowGrid(False)
         self.table.setAlternatingRowColors(False)
         self.table.verticalHeader().setVisible(False)
@@ -706,7 +760,7 @@ class TranslatorWindow(QMainWindow):
         header.setSectionResizeMode(3, QHeaderView.Stretch)
         self.table.setColumnWidth(1, 145)
         self.table.setColumnWidth(2, 150)
-        self.table.setColumnWidth(4, 124)
+        self.table.setColumnWidth(4, 160)
         body_layout.addWidget(self.table)
         body_layout.addStretch(1)
         layout.addWidget(body, 1)
@@ -1058,6 +1112,7 @@ class TranslatorWindow(QMainWindow):
             self.table.setCellWidget(row, 2, StatusCell("pending"))
             self.table.setCellWidget(row, 3, TaskProgressCell())
             actions = OperationCell(
+                lambda _checked=False, value=str(path): self._prioritize_path(value),
                 lambda _checked=False, value=str(path): self._open_outputs(value),
                 lambda _checked=False, value=str(path): self._open_output_folder(value),
                 lambda _checked=False, value=str(path): self._remove_path(value),
@@ -1086,6 +1141,9 @@ class TranslatorWindow(QMainWindow):
         self.progress_timer.stop()
         self.running = False
         self.stop_requested = False
+        with self._preempt_lock:
+            self._preempt_path = None
+        self.run_queue = None
         self.active_run_paths.clear()
         self.task_started = 0.0
         self.progress_fraction = 0.0
@@ -1106,9 +1164,145 @@ class TranslatorWindow(QMainWindow):
         if not self.running and self.table.rowCount() == 0:
             self.status.setText(tr("status.ready"))
 
+    def _row_for_path(self, value: str | Path) -> int:
+        target = str(Path(value).resolve())
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 5)
+            if item and str(Path(item.text()).resolve()) == target:
+                return row
+        return -1
+
+    def _move_row(self, source_row: int, destination_row: int) -> int:
+        """Move one complete table row without recreating its live widgets."""
+
+        if source_row < 0 or source_row >= self.table.rowCount():
+            return source_row
+        destination_row = max(0, min(destination_row, self.table.rowCount() - 1))
+        if source_row == destination_row:
+            return source_row
+        items = [self.table.takeItem(source_row, column) for column in range(self.table.columnCount())]
+        widgets = []
+        for column in range(self.table.columnCount()):
+            widget = self.table.cellWidget(source_row, column)
+            if widget is not None:
+                widget.setParent(None)
+            widgets.append(widget)
+        self.table.removeRow(source_row)
+        destination_row = max(0, min(destination_row, self.table.rowCount()))
+        self.table.insertRow(destination_row)
+        for column, item in enumerate(items):
+            if item is not None:
+                self.table.setItem(destination_row, column, item)
+        for column, widget in enumerate(widgets):
+            if widget is not None:
+                self.table.setCellWidget(destination_row, column, widget)
+        self.table.selectRow(destination_row)
+        return destination_row
+
+    def _move_path_to_priority_position(self, target: str, current: str | None) -> int:
+        source_row = self._row_for_path(target)
+        if source_row < 0:
+            return -1
+        if current:
+            current_row = self._row_for_path(current)
+            if current_row >= 0:
+                destination_row = current_row if source_row < current_row else current_row + 1
+                return self._move_row(source_row, destination_row)
+        return self._move_row(source_row, 0)
+
+    def _reorder_table_to_paths(self, paths: list[str]) -> None:
+        for destination_row, path in enumerate(paths):
+            source_row = self._row_for_path(path)
+            if source_row >= 0 and source_row != destination_row:
+                self._move_row(source_row, destination_row)
+
+    def _request_preempt(self, current: str) -> None:
+        with self._preempt_lock:
+            self._preempt_path = str(Path(current).resolve())
+        # The denominator and current file are about to change. Relearn the
+        # rate instead of showing a stale countdown from the interrupted file.
+        now = time.monotonic()
+        self.progress_rate = 0.0
+        self.progress_samples.clear()
+        self.progress_sample_time = now
+        self.progress_sample_fraction = self.progress_fraction
+        self.eta_seconds = 0.0
+
+    def _should_preempt(self, current: str) -> bool:
+        with self._preempt_lock:
+            return self._preempt_path == str(Path(current).resolve())
+
+    def _consume_preempt(self, current: str) -> bool:
+        target = str(Path(current).resolve())
+        with self._preempt_lock:
+            if self._preempt_path != target:
+                return False
+            self._preempt_path = None
+            return True
+
+    def _prioritize_path(self, value):
+        target = str(Path(value).resolve())
+        row = self._row_for_path(target)
+        if row < 0:
+            return
+        status = self.table.item(row, 2).data(Qt.UserRole) or "pending"
+        if status in {"completed", "processing", "translating", "pausing", "unsupported"}:
+            return
+
+        if self.running and self.run_queue is not None:
+            if self.run_queue.current_path == target:
+                return
+            accepted, _added = self.run_queue.prioritize(target)
+            if accepted:
+                current = self.run_queue.current_path
+                row = self._move_path_to_priority_position(target, current)
+                self.active_run_paths = self.run_queue.snapshot()
+                self._set_row_status(row, "priority")
+                self._set_row_progress(row, 0, tr("status.priority_waiting"))
+                if current and current != target:
+                    self._request_preempt(current)
+                    current_row = self._row_for_path(current)
+                    if current_row >= 0:
+                        self._set_row_status(current_row, "pausing")
+                        self._set_row_progress(
+                            current_row,
+                            self.table.cellWidget(current_row, 3).bar.value() / 1000,
+                            tr("status.pausing_detail"),
+                        )
+                    self.status.setText(
+                        tr(
+                            "status.priority_preempting",
+                            urgent=Path(target).name,
+                            current=Path(current).name,
+                        )
+                    )
+                else:
+                    self.status.setText(
+                        tr("status.priority_queued", name=Path(target).name)
+                    )
+                return
+
+        row = self._move_path_to_priority_position(target, None)
+        self._set_row_status(row, "priority")
+        self._set_row_progress(row, 0, tr("status.priority_waiting"))
+        self.status.setText(
+            tr(
+                "status.priority_next_run"
+                if self.running
+                else "status.priority_queued",
+                name=Path(target).name,
+            )
+        )
+
     def _remove_path(self, value):
         target = str(Path(value).resolve())
-        removing_active = self.running and target in self.active_run_paths
+        current = self.run_queue.current_path if self.run_queue is not None else None
+        removing_active = self.running and (
+            target == current
+            or (self.run_queue is None and target in self.active_run_paths)
+        )
+        if self.run_queue is not None and self.run_queue.remove(target):
+            self.active_run_paths = self.run_queue.snapshot()
         self.outputs_by_input.pop(target, None)
         for row in range(self.table.rowCount() - 1, -1, -1):
             if str(Path(self.table.item(row, 5).text()).resolve()) == target:
@@ -1175,6 +1369,9 @@ class TranslatorWindow(QMainWindow):
         cell = self.table.cellWidget(row, 2)
         if isinstance(cell, StatusCell):
             cell.set_status(text)
+        actions = self.table.cellWidget(row, 4)
+        if isinstance(actions, OperationCell):
+            actions.set_task_status(text)
 
     def _handle_dropped(self, dropped_paths):
         files = []
@@ -1212,19 +1409,9 @@ class TranslatorWindow(QMainWindow):
             {index.row() for index in self.table.selectedIndexes()},
             reverse=True,
         )
-        removing_active = False
-        for row in rows:
-            value = str(Path(self.table.item(row, 5).text()).resolve())
-            removing_active = removing_active or (
-                self.running and value in self.active_run_paths
-            )
-            self.outputs_by_input.pop(value, None)
-            self.table.removeRow(row)
-        self._update_file_count()
-        if removing_active:
-            self._request_stop()
-        else:
-            self._show_ready_if_empty()
+        values = [self.table.item(row, 5).text() for row in rows]
+        for value in values:
+            self._remove_path(value)
 
     def _retry_selected(self):
         rows = {index.row() for index in self.table.selectedIndexes()}
@@ -1294,11 +1481,21 @@ class TranslatorWindow(QMainWindow):
             babeldoc_path=Path(self.saved.babeldoc_path) if self.saved.babeldoc_path else None,
         )
         pending = {str(path.resolve()) for path in paths}
-        self.active_run_paths = [str(path.resolve()) for path in paths]
+        priority_paths = {
+            str(Path(self.table.item(row, 5).text()).resolve())
+            for row in range(self.table.rowCount())
+            if (self.table.item(row, 2).data(Qt.UserRole) or "pending") == "priority"
+        }
+        self.run_queue = PreemptiveTaskQueue(paths, priority_paths)
+        self.active_run_paths = self.run_queue.snapshot()
         for row in range(self.table.rowCount()):
             if str(Path(self.table.item(row, 5).text()).resolve()) in pending:
-                self._set_row_status(row, "queued")
-                self._set_row_progress(row, 0, tr("status.waiting"))
+                if (self.table.item(row, 2).data(Qt.UserRole) or "pending") == "priority":
+                    self._set_row_status(row, "priority")
+                    self._set_row_progress(row, 0, tr("status.priority_waiting"))
+                else:
+                    self._set_row_status(row, "queued")
+                    self._set_row_progress(row, 0, tr("status.waiting"))
         self.stop_requested = False
         self.running = True
         self.start_button.setEnabled(False)
@@ -1318,9 +1515,13 @@ class TranslatorWindow(QMainWindow):
         self.last_progress_at = self.task_started
         self.progress_timer.start()
         self._refresh_progress_text()
-        threading.Thread(target=self._worker, args=(paths, key, options), daemon=True).start()
+        threading.Thread(
+            target=self._worker,
+            args=(self.run_queue, key, options),
+            daemon=True,
+        ).start()
 
-    def _worker(self, paths, key, options):
+    def _worker(self, run_queue, key, options):
         try:
             # Heavy document libraries are deliberately imported only after the
             # user starts a task. This keeps normal application startup fast.
@@ -1336,15 +1537,62 @@ class TranslatorWindow(QMainWindow):
                 quality_review=options.quality_review,
                 force_refresh=options.force_refresh,
             )
-            def publish_progress(file_path, fraction, message):
+            pipeline = TranslationPipeline()
+            pipeline.begin_dynamic_batch()
+            results = []
+            first_source = None
+            while not self.stop_requested:
+                current = run_queue.pop_next()
+                if current is None:
+                    break
+                source = Path(current)
+                if first_source is None:
+                    first_source = source
+
+                def publish_progress(_file_path, fraction, message):
+                    if self.stop_requested:
+                        raise TranslationStopped()
+                    if self._should_preempt(current):
+                        raise TranslationPreempted()
+                    total = max(run_queue.total_count, 1)
+                    overall = (
+                        run_queue.completed_count
+                        + min(1.0, max(0.0, float(fraction)))
+                    ) / total
+                    self.bridge.progress.emit(current, overall, message)
+
+                try:
+                    current_results = pipeline.run(
+                        [source],
+                        translator,
+                        options,
+                        publish_progress,
+                    )
+                except TranslationPreempted:
+                    current_results = []
+
                 if self.stop_requested:
                     raise TranslationStopped()
-                self.bridge.progress.emit(file_path, fraction, message)
+                preempted = self._consume_preempt(current)
+                completed = bool(current_results) and all(
+                    result.status == "completed" for result in current_results
+                )
+                if preempted and not completed:
+                    run_queue.requeue_current(current)
+                    self.bridge.preempted.emit(current)
+                    continue
 
-            results = TranslationPipeline().run(paths, translator, options, publish_progress)
+                run_queue.complete_current(current)
+                results.extend(current_results)
+                for result in current_results:
+                    self.bridge.file_done.emit(result)
+
             if self.stop_requested:
                 raise TranslationStopped()
-            report = write_report(results, options.output_dir or paths[0].parent)
+            output_root = options.output_dir or (
+                first_source.parent if first_source is not None else Path.cwd()
+            )
+            report = write_report(results, output_root)
             self.bridge.done.emit(results, str(report))
         except TranslationStopped:
             self.bridge.stopped.emit()
@@ -1381,7 +1629,15 @@ class TranslatorWindow(QMainWindow):
         if not self.running or self.stop_requested:
             return
         now = time.monotonic()
-        fraction = min(1.0, max(self.progress_fraction, float(fraction)))
+        fraction = min(1.0, max(0.0, float(fraction)))
+        if fraction + 0.001 < self.progress_fraction:
+            # A true priority preemption abandons the unfinished portion of
+            # the current layout pass and changes the task denominator.
+            self.progress_rate = 0.0
+            self.progress_samples.clear()
+            self.progress_sample_time = now
+            self.progress_sample_fraction = fraction
+            self.eta_seconds = 0.0
         elapsed = now - self.progress_sample_time
         advanced = fraction - self.progress_sample_fraction
         if elapsed >= 0.5 and advanced > 0:
@@ -1409,6 +1665,44 @@ class TranslatorWindow(QMainWindow):
                 self.table.cellWidget(row, 3).setToolTip(message)
                 break
         self._refresh_progress_text()
+
+    def _on_file_done(self, result):
+        if not self.running:
+            return
+        target = str(Path(result.input_path).resolve())
+        row = self._row_for_path(target)
+        if row < 0:
+            return
+        label = "completed" if result.status == "completed" else "failed"
+        self._set_row_status(row, label)
+        if result.status == "completed":
+            self._set_row_progress(row, 1.0, "100%")
+            self._set_row_outputs(
+                row,
+                result.input_path,
+                [result.output_path, *result.additional_outputs],
+            )
+
+    def _on_preempted(self, input_path):
+        if not self.running or self.run_queue is None:
+            return
+        self.active_run_paths = self.run_queue.snapshot()
+        self._reorder_table_to_paths(self.active_run_paths)
+        row = self._row_for_path(input_path)
+        if row >= 0:
+            progress = self.table.cellWidget(row, 3)
+            fraction = progress.bar.value() / 1000 if isinstance(progress, TaskProgressCell) else 0
+            self._set_row_status(row, "paused")
+            self._set_row_progress(row, fraction, tr("status.paused_detail"))
+        pending = self.run_queue.pending_snapshot()
+        urgent = Path(pending[0]).name if pending else ""
+        self.status.setText(
+            tr(
+                "status.paused_for_priority",
+                current=Path(input_path).name,
+                urgent=urgent,
+            )
+        )
 
     def _refresh_progress_text(self):
         if not self.running or not self.task_started:
@@ -1490,7 +1784,14 @@ class TranslatorWindow(QMainWindow):
         self._reset_run_state()
         for row in range(self.table.rowCount()):
             status = self.table.item(row, 2).data(Qt.UserRole)
-            if status in {"queued", "processing", "translating"}:
+            if status in {
+                "queued",
+                "priority",
+                "processing",
+                "translating",
+                "pausing",
+                "paused",
+            }:
                 self._set_row_status(row, "failed")
         self._update_file_count()
         if self.table.rowCount() == 0:
@@ -1506,7 +1807,15 @@ class TranslatorWindow(QMainWindow):
         self._reset_run_state()
         for row in range(self.table.rowCount()):
             status = self.table.item(row, 2).data(Qt.UserRole)
-            if status in {"queued", "processing", "translating", "failed"}:
+            if status in {
+                "queued",
+                "priority",
+                "processing",
+                "translating",
+                "pausing",
+                "paused",
+                "failed",
+            }:
                 self._set_row_status(row, "pending")
         self._update_file_count()
         self.status.setText(

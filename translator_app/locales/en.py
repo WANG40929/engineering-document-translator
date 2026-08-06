@@ -36,6 +36,7 @@ TRANSLATIONS = {
     "common.open": "Open",
     "common.open_file": "Open file",
     "common.open_folder": "Open folder",
+    "common.priority_tooltip": "Urgent: safely pause the current file and translate this one first",
     "common.retry": "Retry",
     "common.requeue": "Queue again",
     "common.clear": "Clear",
@@ -84,8 +85,11 @@ TRANSLATIONS = {
     "status.waiting": "Waiting",
     "status.pending": "Pending",
     "status.queued": "Queued",
+    "status.priority": "Urgent",
     "status.processing": "Processing",
     "status.translating": "Translating",
+    "status.pausing": "Pausing",
+    "status.paused": "Paused",
     "status.completed": "Completed",
     "status.failed": "Failed",
     "status.unsupported": "Unsupported",
@@ -96,6 +100,13 @@ TRANSLATIONS = {
     "status.file_missing": "Output file was moved or deleted",
     "status.opening_file": "Opening translated file",
     "status.opening_folder": "Opening output folder",
+    "status.priority_waiting": "Urgent task · Waiting for priority processing",
+    "status.pausing_detail": "Pausing safely after the current request",
+    "status.paused_detail": "Paused · Will resume from cache after urgent work",
+    "status.priority_preempting": "Urgent: {urgent} · Pausing {current}",
+    "status.priority_queued": "Marked {name} as urgent",
+    "status.priority_next_run": "The batch is ending; {name} will be first in the next run",
+    "status.paused_for_priority": "Paused {current} · Processing {urgent} first",
 
     # File pickers and dialogs
     "dialog.select_documents": "Select documents",
@@ -236,6 +247,7 @@ TRANSLATIONS = {
     "warning.pdf_quality_scan_failed": "PDF layout verification failed; the smart-layout result was kept: {reason}",
     "warning.pdf_quality_repair_failed": "Automatic page repair failed; the smart-layout result was kept: {reason}",
     "warning.pdf_text_overflow": "Not enough room in the text box on page {page}: {text}",
+    "warning.pdf_source_preserved": "The translation would not fit at a readable size on page {page}; the source text was preserved: {text}",
     "warning.pdf_font_reduced": "Translation font reduced to {size:.1f} pt on page {page}: {text}",
 
     # Installer, portable package and user guide

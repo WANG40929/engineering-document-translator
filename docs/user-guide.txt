@@ -13,6 +13,10 @@
 
 推荐：PDF 模式保持“自动选择”。软件会根据页面内容选择智能排版或原位保版。
 
+紧急插队：翻译过程中，点击紧急文件右侧的“向上箭头”。软件会在当前接口
+请求结束后的安全检查点暂停当前文件，先完成紧急文件，再利用缓存继续原文件。
+为保护成品，正在保存文件时不会被强制中断。
+
 
 二、三个发行版本
 
@@ -57,8 +61,10 @@ Legal
 
 智能排版
   BabelDOC 分析段落、字体和页面结构，DeepSeek 完成翻译，然后重新排版。
-  v1.4.0 会在生成后逐页检查文字分布、隐藏或裁切文字和异常小字号；发现
-  问题时只重译并替换相应页面，其余正常页面保持智能排版结果。
+  v1.4.4 会在生成后逐页检查半字裁切、横线遮字、孤立源文残片、文字行
+  重叠、结构行异常合并、文字分布和异常小字号；发现问题时只重译相应页面。
+  提示框使用完整可用区域，真正的表格仍保持单元格边界。修复页再次验收，
+  仍有问题就回滚，不会覆盖原本更可读的智能排版页。
 
 原位保版
   尽量在原文字坐标处替换内容，适合工程图纸、表格和固定位置文字。
@@ -132,6 +138,10 @@ ENGLISH QUICK GUIDE
 4. Choose source language, target language, and output folder, then start.
 5. When complete, select Open File or Open Folder beside the task.
 
+Urgent priority: select the upward arrow beside an urgent file. The application
+pauses the active file at a safe checkpoint, finishes the urgent file first,
+then resumes the original file from cache.
+
 EDITIONS
 
 - Setup Full: recommended; installs the application and bundled BabelDOC engine.
@@ -148,9 +158,11 @@ PDF MODES
 
 Automatic is recommended. Smart Layout is best for reports and manuals. Strict
 Layout is best for drawings, labels, tables, and fixed-position content.
-In v1.4.0, Smart Layout is checked page by page after generation. Pages with
-clipped, hidden, collapsed, or unreadably small text are selectively repaired
-without reprocessing pages that passed.
+In v1.4.4, Smart Layout is checked page by page for half-clipped glyphs,
+rule-obscured text, isolated source fragments, overlapping lines, collapsed
+structures, abnormal distribution, and unreadably small text. Notice regions
+use their full available area and real tables remain cell-bounded. Every repair
+is rescanned and rolled back if it is less readable than the Smart Layout page.
 Image-only text is not OCR-translated by default.
 
 GLOSSARIES AND CACHE

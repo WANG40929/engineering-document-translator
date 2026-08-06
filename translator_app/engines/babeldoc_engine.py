@@ -643,12 +643,22 @@ class BabelDocEngine(TranslationEngine):
                     quality_usage["repair"] = {
                         "status": repair_result.status,
                         "translated_units": repair_result.translated_units,
+                        "skipped_units": repair_result.skipped_units,
+                        "skipped_pages": list(repair_result.skipped_pages),
+                        "repaired_pages": list(
+                            repair_result.usage.get("repaired_pages", [])
+                        ),
+                        "failed_pages": list(
+                            repair_result.usage.get("failed_pages", [])
+                        ),
                         "warnings": list(repair_result.warnings),
                         "errors": list(repair_result.errors),
                         "elapsed_seconds": repair_result.elapsed_seconds,
                     }
-                    if repair_result.status == "completed":
-                        repaired_pages = candidates
+                    repaired_pages = list(
+                        repair_result.usage.get("repaired_pages", [])
+                    )
+                    if repair_result.status == "completed" and repaired_pages:
                         result.engine = (
                             "BabelDOC smart layout + adaptive page repair"
                         )
