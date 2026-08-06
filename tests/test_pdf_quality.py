@@ -10,6 +10,7 @@ import fitz
 from translator_app.deepseek import IdentityTranslator
 from translator_app.engines.adaptive_pdf_engine import (
     AdaptivePdfEngine,
+    _line_span_groups,
     _uses_table_cell_boundaries,
     rebuild_dual_pages,
     repair_pdf_pages,
@@ -31,6 +32,36 @@ def _write_lines(path: Path, positions: list[float], *, size: float = 11.0) -> N
         )
     document.save(path)
     document.close()
+
+
+def _draw_dense_table(page: fitz.Page) -> None:
+    left, top = 30.0, 30.0
+    cell_width, cell_height = 85.0, 35.0
+    rows, columns = 5, 5
+    for row in range(rows + 1):
+        y = top + row * cell_height
+        page.draw_line(
+            (left, y),
+            (left + columns * cell_width, y),
+            color=(0, 0, 0),
+        )
+    for column in range(columns + 1):
+        x = left + column * cell_width
+        page.draw_line(
+            (x, top),
+            (x, top + rows * cell_height),
+            color=(0, 0, 0),
+        )
+    for row in range(rows):
+        for column in range(columns):
+            page.insert_text(
+                (
+                    left + column * cell_width + 4,
+                    top + row * cell_height + 18,
+                ),
+                f"R{row + 1}C{column + 1}",
+                fontsize=7,
+            )
 
 
 class PdfQualityTests(unittest.TestCase):
@@ -119,6 +150,72 @@ class PdfQualityTests(unittest.TestCase):
         self.assertIn("rendered_text_hidden_or_clipped", report.issues[0].reasons)
         self.assertGreaterEqual(report.issues[0].hidden_characters, 8)
 
+    def test_quality_scan_detects_bottom_half_clipped_text(self):
+        source = self.root / "source.pdf"
+        translated = self.root / "translated.pdf"
+        visible = "Continuous lower-half clipping must be detected reliably"
+
+        source_document = fitz.open()
+        source_document.new_page(width=500, height=250).insert_text(
+            (40, 100),
+            visible,
+            fontsize=12,
+        )
+        source_document.save(source)
+        source_document.close()
+
+        translated_document = fitz.open()
+        page = translated_document.new_page(width=500, height=250)
+        page.insert_text((40, 100), visible, fontsize=12)
+        page.draw_rect(
+            fitz.Rect(35, 92, 470, 112),
+            color=(1, 1, 1),
+            fill=(1, 1, 1),
+            overlay=True,
+        )
+        translated_document.save(translated)
+        translated_document.close()
+
+        report = analyze_pdf_quality(source, translated, render_scale=2.0)
+
+        self.assertEqual(report.repair_pages, [1])
+        self.assertIn("text_partially_clipped", report.issues[0].reasons)
+        self.assertGreaterEqual(
+            report.issues[0].partially_clipped_characters,
+            4,
+        )
+
+    def test_quality_scan_detects_stray_latin_translation_fragments(self):
+        source = self.root / "source.pdf"
+        translated = self.root / "translated.pdf"
+
+        source_document = fitz.open()
+        source_document.new_page(width=500, height=250).insert_text(
+            (40, 90),
+            "Remove transportation locking and check all supplied parts",
+            fontsize=11,
+        )
+        source_document.save(source)
+        source_document.close()
+
+        translated_document = fitz.open()
+        page = translated_document.new_page(width=500, height=250)
+        page.insert_text(
+            (40, 90),
+            "拆除运输锁定装置并检查全部随附零件是否完整且没有损坏",
+            fontname="china-ss",
+            fontsize=11,
+        )
+        page.insert_text((390, 115), "s", fontsize=11)
+        translated_document.save(translated)
+        translated_document.close()
+
+        report = analyze_pdf_quality(source, translated, render_scale=1.5)
+
+        self.assertEqual(report.repair_pages, [1])
+        self.assertIn("stray_latin_fragment", report.issues[0].reasons)
+        self.assertEqual(report.issues[0].suspicious_latin_fragments, 1)
+
     def test_quality_scan_detects_new_overlapping_lines(self):
         source = self.root / "source.pdf"
         translated = self.root / "translated.pdf"
@@ -142,6 +239,32 @@ class PdfQualityTests(unittest.TestCase):
         self.assertEqual(report.repair_pages, [1])
         self.assertIn("text_lines_overlapping", report.issues[0].reasons)
         self.assertGreaterEqual(report.issues[0].overlapping_text_pairs, 1)
+
+    def test_quality_scan_does_not_repair_dense_table_for_bbox_overlap_only(self):
+        source = self.root / "source.pdf"
+        translated = self.root / "translated.pdf"
+
+        source_document = fitz.open()
+        _draw_dense_table(source_document.new_page(width=500, height=250))
+        source_document.save(source)
+        source_document.close()
+
+        translated_document = fitz.open()
+        page = translated_document.new_page(width=500, height=250)
+        _draw_dense_table(page)
+        page.insert_text((38, 52), "Translated table value one", fontsize=7)
+        page.insert_text((90, 52), "Translated table value two", fontsize=7)
+        translated_document.save(translated)
+        translated_document.close()
+
+        report = analyze_pdf_quality(source, translated, render_scale=1.5)
+
+        self.assertFalse(
+            any(
+                "text_lines_overlapping" in issue.reasons
+                for issue in report.issues
+            )
+        )
 
     def test_quality_scan_detects_collapsed_structured_labels(self):
         source = self.root / "source.pdf"
@@ -360,7 +483,7 @@ class PdfQualityTests(unittest.TestCase):
                 "rotate": 0,
                 "align": 0,
                 "block": 7,
-                "bold": True,
+                "bold": False,
                 "table": False,
                 "container_rect": None,
                 "header": False,
@@ -381,6 +504,50 @@ class PdfQualityTests(unittest.TestCase):
         self.assertTrue(rendered_translations[0].startswith("◆ "))
         self.assertTrue(rendered_translations[0].splitlines()[1].startswith(" "))
         self.assertEqual(rendered_lines[0]["fit_rect"].y1, 170)
+        self.assertEqual(rendered_lines[0]["lineheight"], 1.25)
+
+    def test_adaptive_flow_keeps_heading_and_body_separate(self):
+        heading = {
+            "text": "Storage time in the warehouse",
+            "rect": fitz.Rect(80, 100, 260, 115),
+            "redact_rect": fitz.Rect(80, 100, 260, 115),
+            "fit_rect": fitz.Rect(80, 100, 340, 125),
+            "size": 12.0,
+            "color": (0, 0, 0),
+            "rotate": 0,
+            "align": 0,
+            "block": 7,
+            "bold": True,
+            "table": False,
+            "container_rect": None,
+            "header": False,
+            "starts_bullet": False,
+            "strip_generated_bullet": True,
+        }
+        body = dict(heading)
+        body.update(
+            {
+                "text": "The expected life increases up to five years.",
+                "rect": fitz.Rect(60, 116, 300, 131),
+                "redact_rect": fitz.Rect(60, 116, 300, 131),
+                "fit_rect": fitz.Rect(60, 116, 340, 170),
+                "size": 11.0,
+                "bold": False,
+            }
+        )
+
+        rendered_lines, rendered_translations = (
+            AdaptivePdfEngine()._coalesce_application_lines(
+                [heading, body],
+                ["仓库内存储时间", "预期寿命可延长至五年。"],
+            )
+        )
+
+        self.assertEqual(len(rendered_lines), 2)
+        self.assertEqual(
+            rendered_translations,
+            ["仓库内存储时间", "预期寿命可延长至五年。"],
+        )
 
     def test_adaptive_flow_does_not_duplicate_preserved_bullet(self):
         lines = [
@@ -483,6 +650,44 @@ class PdfQualityTests(unittest.TestCase):
             cells = [(0, 0, 1, 1)] * 12
 
         self.assertTrue(_uses_table_cell_boundaries(Table()))
+
+    def test_wide_notice_column_is_not_split_into_pseudo_cells(self):
+        class Table:
+            row_count = 4
+            col_count = 3
+            bbox = (129.2, 583.5, 512.3, 667.1)
+            cells = [
+                (129.2, 583.5, 133.5, 606.6),
+                (129.2, 606.6, 133.5, 667.1),
+                (133.5, 583.5, 507.8, 606.6),
+                (133.5, 606.6, 507.8, 630.4),
+                (133.5, 630.4, 507.8, 645.8),
+                (133.5, 645.8, 507.8, 667.1),
+                (507.8, 583.5, 512.3, 606.6),
+                (507.8, 606.6, 512.3, 667.1),
+            ]
+
+        self.assertFalse(_uses_table_cell_boundaries(Table()))
+
+    def test_pdf_row_spans_are_split_at_table_cell_boundaries(self):
+        spans = [
+            {"text": "Primer", "bbox": (45, 80, 95, 92)},
+            {"text": "Hempel", "bbox": (145, 80, 195, 92)},
+            {"text": "Jotun", "bbox": (245, 80, 285, 92)},
+        ]
+        cells = [
+            fitz.Rect(40, 60, 120, 100),
+            fitz.Rect(120, 60, 220, 100),
+            fitz.Rect(220, 60, 320, 100),
+            fitz.Rect(40, 60, 320, 100),
+        ]
+
+        groups = _line_span_groups(spans, cells)
+
+        self.assertEqual(
+            [[span["text"] for span in group] for group in groups],
+            [["Primer"], ["Hempel"], ["Jotun"]],
+        )
 
     def test_adaptive_layout_uses_whole_single_column_notice_region(self):
         source = self.root / "source.pdf"
@@ -629,6 +834,57 @@ class PdfQualityTests(unittest.TestCase):
                 "Keep failed second smart-layout page",
                 document[1].get_text(),
             )
+        finally:
+            document.close()
+
+    def test_adaptive_repair_rolls_back_page_that_fails_post_validation(self):
+        source = self.root / "source.pdf"
+        target = self.root / "target.pdf"
+        _write_lines(
+            source,
+            [50, 85, 120, 155, 190, 225, 260, 295, 330, 365],
+        )
+        target_document = fitz.open()
+        target_document.new_page(width=400, height=500).insert_text(
+            (40, 80),
+            "Keep smart-layout page",
+        )
+        target_document.save(target)
+        target_document.close()
+
+        def collapsed_translate(
+            _engine,
+            _selected_source,
+            selected_output,
+            _translator,
+            _options,
+            _progress,
+        ):
+            _write_lines(selected_output, [50, 85, 120, 155])
+            return FileResult(
+                input_path=str(source),
+                output_path=str(selected_output),
+                status="completed",
+            )
+
+        with patch.object(
+            AdaptivePdfEngine,
+            "translate",
+            collapsed_translate,
+        ):
+            result = repair_pdf_pages(
+                source,
+                target,
+                [1],
+                IdentityTranslator(),
+                TranslationOptions(target_language="zh"),
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.usage["failed_pages"], [1])
+        document = fitz.open(target)
+        try:
+            self.assertIn("Keep smart-layout page", document[0].get_text())
         finally:
             document.close()
 

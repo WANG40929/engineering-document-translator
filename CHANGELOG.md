@@ -4,6 +4,28 @@
 
 This project follows semantic versioning. Stable builds are available from [GitHub Releases](https://github.com/WANG40929/engineering-document-translator/releases).
 
+## 1.4.4
+
+### 中文
+
+- PDF 质检新增连续半字裁切与孤立源文短字母检测，可识别此前漏报的横线遮字、文本框底部裁切以及残留的 `e`、`s` 等字符。
+- 中文正文与提示框采用更安全的行距，粗体标题不再与后续正文错误合并，避免标题、段落和项目符号互相压叠。
+- 修正提示框被识别成三列伪表格的问题，整段说明现在共享完整区域，不再因逐行翻译而出现重复或断裂。
+- 真正的多列表格按单元格拆分、使用适合表格的行距和字号；密集工程表格不再因正常的字形边界接触而被误判重排。
+- 问题页修复后立即进行独立质量复检；仍有裁切、重叠或内容异常的页面自动回滚，绝不覆盖原本更可读的智能排版页。
+- 优化 PDF 质检性能：只在检测到潜在行重叠时分析表格结构，294 页样本的二次扫描时间由约 37 秒缩短到约 16 秒。
+- 使用用户提供的 294 页工程手册复测：33 个真实问题页全部完成重排，整本二次扫描无残留问题页，并目视复核正文、提示框和密集表格代表页。
+
+### English
+
+- Detects continuously half-clipped glyphs and isolated short source-language debris such as `e` or `s`, covering rule-obscured text and textbox-bottom clipping that older scans missed.
+- Uses safer CJK leading and keeps bold headings separate from following body text, preventing headings, paragraphs, and bullets from painting over one another.
+- Stops treating notice panels as narrow three-column pseudo-tables, so each notice paragraph shares its full region without duplicated or fragmented translation.
+- Splits real multi-column rows by cell, applies table-appropriate leading and font sizing, and avoids repairing dense engineering tables solely because normal glyph bounding boxes touch.
+- Revalidates every repaired page before committing it; any page with residual clipping, overlap, or structural damage is rolled back instead of replacing a more readable smart-layout page.
+- Runs expensive table analysis only when potential line overlap is present, reducing the supplied 294-page second-pass scan from about 37 seconds to about 16 seconds.
+- Regressed the supplied 294-page engineering manual: all 33 genuine problem pages were reflowed, the full second scan reported no residual pages, and representative prose, notice, and dense-table pages passed visual inspection.
+
 ## 1.4.3
 
 ### 中文

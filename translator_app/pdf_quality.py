@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 import time
+import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
@@ -29,6 +30,8 @@ class PageQualityIssue:
     score: float
     reasons: tuple[str, ...]
     hidden_characters: int
+    partially_clipped_characters: int
+    suspicious_latin_fragments: int
     internal_placeholder_hits: int
     replacement_character_hits: int
     characters_under_5_5pt: int
@@ -77,6 +80,10 @@ class _PageProfile:
     centroid: float
     spread: float
     hidden_characters: int = 0
+    partially_clipped_characters: int = 0
+    suspicious_latin_fragments: int = 0
+    cjk_characters: int = 0
+    dense_table_cells: int = 0
     internal_placeholder_hits: int = 0
     replacement_character_hits: int = 0
     overlapping_text_pairs: int = 0
@@ -92,12 +99,12 @@ def _coverage(histogram: list[int], upper: int) -> float:
     return sum(histogram[:upper]) / total if total else 0.0
 
 
-def _hidden_character_count(
+def _glyph_visibility_metrics(
     page: fitz.Page,
     raster: Image.Image,
     page_rect: fitz.Rect,
     scale: float,
-) -> int:
+) -> tuple[int, int]:
     """Count glyphs that remain in the text layer but are not visibly rendered.
 
     Smart PDF engines often clip only the lower half or the final characters
@@ -107,19 +114,33 @@ def _hidden_character_count(
     """
 
     hidden = 0
+    partially_clipped = 0
     raw_data = page.get_text("rawdict", flags=fitz.TEXTFLAGS_TEXT)
     for block in raw_data.get("blocks", []):
         if block.get("type") != 0:
             continue
         for line in block.get("lines", []):
+            low_coverage_run = 0
+
+            def commit_low_coverage_run() -> None:
+                nonlocal partially_clipped, low_coverage_run
+                # A single thin glyph can naturally contain very little ink.
+                # Four adjacent letters/numbers with only their top or bottom
+                # edge visible are a reliable signature of textbox clipping.
+                if low_coverage_run >= 4:
+                    partially_clipped += low_coverage_run
+                low_coverage_run = 0
+
             for span in line.get("spans", []):
                 text_color = _rgb_from_int(int(span.get("color", 0)))
                 for character in span.get("chars", []):
                     value = str(character.get("c", ""))
                     if not value or value.isspace():
+                        commit_low_coverage_run()
                         continue
                     rect = fitz.Rect(character["bbox"]) & page_rect
                     if rect.is_empty:
+                        commit_low_coverage_run()
                         continue
                     # Symbol-font check marks are commonly exposed as private
                     # use characters whose PDF text color/shape metadata does
@@ -131,6 +152,7 @@ def _hidden_character_count(
                         any("\uf000" <= item <= "\uf8ff" for item in value)
                         or rect.width / max(rect.height, 0.1) <= 0.32
                     ):
+                        commit_low_coverage_run()
                         continue
                     x0 = max(
                         0,
@@ -161,13 +183,78 @@ def _hidden_character_count(
                         ),
                     )
                     if x1 <= x0 or y1 <= y0:
+                        commit_low_coverage_run()
                         continue
                     crop = raster.crop((x0, y0, x1, y1))
                     solid = Image.new("RGB", crop.size, text_color)
                     difference = ImageChops.difference(crop, solid).convert("L")
-                    if _coverage(difference.histogram(), 80) < 0.003:
+                    ink_coverage = _coverage(difference.histogram(), 80)
+                    if ink_coverage < 0.003:
                         hidden += 1
-    return hidden
+                    is_letter_or_number = any(
+                        unicodedata.category(item).startswith(("L", "N"))
+                        for item in value
+                    )
+                    if is_letter_or_number and ink_coverage < 0.015:
+                        low_coverage_run += 1
+                    else:
+                        commit_low_coverage_run()
+            commit_low_coverage_run()
+    return hidden, partially_clipped
+
+
+def _suspicious_latin_fragment_count(data: dict) -> int:
+    """Count likely one- or two-letter translation debris.
+
+    Layout engines occasionally leave an isolated source fragment behind
+    after redaction (for example ``e`` or ``s``), or append it to a translated
+    Chinese line. Legitimate short engineering labels are discounted later by
+    comparing the translated page with the source page.
+    """
+
+    count = 0
+    for block in data.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            text = "".join(
+                str(span.get("text", ""))
+                for span in line.get("spans", [])
+            ).strip()
+            if not text:
+                continue
+            normalized = " ".join(text.split())
+            if re.fullmatch(r"[A-Za-z]{1,2}", normalized):
+                count += 1
+                continue
+            if (
+                re.search(r"[\u3400-\u9fff]", normalized)
+                and re.search(
+                    r"(?:[\u3400-\u9fff]|[。！？，、；：）】])"
+                    r"\s*[◆◇●○•·]?\s*[A-Za-z]{1,2}$",
+                    normalized,
+                )
+            ):
+                count += 1
+    return count
+
+
+def _dense_table_cell_count(page: fitz.Page) -> int:
+    """Return cells from large engineering tables, excluding notice boxes."""
+
+    try:
+        count = 0
+        for table in page.find_tables().tables:
+            rows = int(getattr(table, "row_count", 0) or 0)
+            columns = int(getattr(table, "col_count", 0) or 0)
+            if rows >= 2 and columns >= 4:
+                count += sum(
+                    cell is not None
+                    for cell in getattr(table, "cells", ())
+                )
+        return count
+    except Exception:
+        return 0
 
 
 def _line_overlap_metrics(data: dict) -> tuple[int, int]:
@@ -196,7 +283,7 @@ def _line_overlap_metrics(data: dict) -> tuple[int, int]:
             y_overlap = min(left.y1, right.y1) - max(left.y0, right.y0)
             if (
                 x_overlap >= min(left.width, right.width) * 0.15
-                and y_overlap >= min(left.height, right.height) * 0.55
+                and y_overlap >= min(left.height, right.height) * 0.20
             ):
                 pairs += 1
                 characters += min(left_count, right_count)
@@ -218,8 +305,10 @@ def _page_profile(
     block_count = 0
     y_values: list[tuple[float, int]] = []
     hidden_characters = 0
+    partially_clipped_characters = 0
     internal_placeholder_hits = 0
     replacement_character_hits = 0
+    cjk_characters = 0
 
     data = page.get_text("dict", flags=fitz.TEXTFLAGS_TEXT)
     raster = None
@@ -247,6 +336,10 @@ def _page_profile(
                     INTERNAL_PLACEHOLDER_RE.findall(raw_text)
                 )
                 replacement_character_hits += raw_text.count("\ufffd")
+                cjk_characters += sum(
+                    "\u3400" <= character <= "\u9fff"
+                    for character in raw_text
+                )
                 compact = "".join(
                     character
                     for character in raw_text
@@ -283,11 +376,13 @@ def _page_profile(
     weighted_y_count = sum(count for _y, count in y_values)
     used_y = [y for y, _count in y_values]
     if raster is not None:
-        hidden_characters = _hidden_character_count(
-            page,
-            raster,
-            page_rect,
-            render_scale,
+        hidden_characters, partially_clipped_characters = (
+            _glyph_visibility_metrics(
+                page,
+                raster,
+                page_rect,
+                render_scale,
+            )
         )
     overlapping_pairs, overlapping_characters = _line_overlap_metrics(data)
     return _PageProfile(
@@ -309,6 +404,15 @@ def _page_profile(
             (max(used_y) - min(used_y)) / height if len(used_y) > 1 else 0.0
         ),
         hidden_characters=hidden_characters,
+        partially_clipped_characters=partially_clipped_characters,
+        suspicious_latin_fragments=_suspicious_latin_fragment_count(data),
+        cjk_characters=cjk_characters,
+        # Table detection is comparatively expensive and can emit noisy
+        # structure-tree diagnostics for malformed PDFs. It is needed only
+        # when line overlap would otherwise trigger a repair.
+        dense_table_cells=(
+            _dense_table_cell_count(page) if overlapping_pairs else 0
+        ),
         internal_placeholder_hits=internal_placeholder_hits,
         replacement_character_hits=replacement_character_hits,
         overlapping_text_pairs=overlapping_pairs,
@@ -346,6 +450,20 @@ def _compare_profiles(
         translated.overlapping_text_characters
         - source.overlapping_text_characters,
     )
+    partially_clipped_excess = max(
+        0,
+        translated.partially_clipped_characters
+        - source.partially_clipped_characters,
+    )
+    suspicious_fragment_excess = max(
+        0,
+        translated.suspicious_latin_fragments
+        - source.suspicious_latin_fragments,
+    )
+    table_heavy = max(
+        source.dense_table_cells,
+        translated.dense_table_cells,
+    ) >= 20
     font_penalty = (
         max(0.0, MINIMUM_READABLE_FONT - translated.minimum_font_size)
         / MINIMUM_READABLE_FONT
@@ -362,6 +480,8 @@ def _compare_profiles(
         + font_penalty * 3.0
         + min(translated.characters_under_5_5pt / 100.0, 2.0)
         + min(translated.hidden_characters / 12.0, 4.0)
+        + min(partially_clipped_excess / 8.0, 4.0)
+        + min(suspicious_fragment_excess * 2.0, 6.0)
         + min(translated.internal_placeholder_hits * 2.0, 6.0)
         + min(translated.replacement_character_hits * 2.0, 6.0)
         + min(overlap_character_excess / 12.0, 4.0)
@@ -375,6 +495,14 @@ def _compare_profiles(
     reasons: list[str] = []
     if translated.hidden_characters >= 5 and hidden_ratio >= 0.015:
         reasons.append("rendered_text_hidden_or_clipped")
+    if partially_clipped_excess >= 4:
+        reasons.append("text_partially_clipped")
+    if (
+        translated.cjk_characters >= 20
+        and translated.line_count <= 60
+        and suspicious_fragment_excess >= 1
+    ):
+        reasons.append("stray_latin_fragment")
     if translated.internal_placeholder_hits:
         reasons.append("internal_placeholder_leak")
     if translated.replacement_character_hits:
@@ -391,7 +519,11 @@ def _compare_profiles(
         reasons.append("content_collapsed_vertically")
     if block_ratio <= 0.30 and source.block_count >= 8:
         reasons.append("text_blocks_merged")
-    if overlap_pair_excess >= 1 and overlap_character_excess >= 4:
+    if (
+        not table_heavy
+        and overlap_pair_excess >= 1
+        and overlap_character_excess >= 24
+    ):
         reasons.append("text_lines_overlapping")
     if source.line_count >= 8 and line_ratio <= 0.58:
         reasons.append("text_lines_collapsed")
@@ -403,6 +535,8 @@ def _compare_profiles(
         score=round(score, 4),
         reasons=tuple(reasons),
         hidden_characters=translated.hidden_characters,
+        partially_clipped_characters=partially_clipped_excess,
+        suspicious_latin_fragments=suspicious_fragment_excess,
         internal_placeholder_hits=translated.internal_placeholder_hits,
         replacement_character_hits=translated.replacement_character_hits,
         characters_under_5_5pt=translated.characters_under_5_5pt,

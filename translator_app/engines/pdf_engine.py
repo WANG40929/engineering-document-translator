@@ -150,7 +150,11 @@ class PdfEngine(TranslationEngine):
                 fontsize=candidate_size,
                 color=line["color"],
                 rotate=rotation,
-                lineheight=1.0,
+                # The bundled CJK font has a taller visible glyph box than
+                # Latin fonts at the same point size. A 1.0 baseline step can
+                # therefore make wrapped Chinese lines visibly overlap even
+                # when insert_textbox reports success.
+                lineheight=float(line.get("lineheight", 1.25)),
             )
             if spare >= -0.05:
                 shape.commit(overlay=True)
