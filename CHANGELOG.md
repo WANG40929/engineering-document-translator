@@ -11,6 +11,8 @@ This project follows semantic versioning. Stable builds are available from [GitH
 - 新增多供应商服务配置，预置 DeepSeek、OpenAI、Anthropic Claude、Google Gemini、阿里云百炼/Qwen、Azure OpenAI、Moonshot/Kimi、智谱 GLM、火山方舟/豆包、SiliconFlow、OpenRouter、Mistral、Groq、Together AI，以及本地 Ollama、LM Studio、vLLM。
 - 新增通用 OpenAI-compatible、Anthropic Messages 和 Azure OpenAI 三类协议适配；只向支持的服务发送 JSON 模式或 DeepSeek 思考控制参数。
 - 支持多个独立配置、手动接口地址和模型、连接测试、模型列表读取，以及主服务失败后的可选备用服务。
+- 新增服务按“配置 1、配置 2……”编号，支持自定义命名；切换供应商不会覆盖名称，备用服务不会误选当前服务。
+- 主界面的当前服务改为纯摘要显示；设置页禁止滚轮误切换 API 供应商，并统一为纯白背景与无横向滚动的六语言布局。
 - 每个配置的 API Key 使用 Windows DPAPI 分别加密，并自动迁移原有 DeepSeek 密钥。
 - 翻译缓存加入供应商、协议、接口地址与模型隔离，避免不同服务之间复用不匹配的译文。
 - 智能 PDF 只选择 OpenAI-compatible 服务；原生 Anthropic 可搭配兼容备用服务，或使用原位保版模式。
@@ -21,6 +23,8 @@ This project follows semantic versioning. Stable builds are available from [GitH
 - Added multiple provider profiles with presets for major hosted APIs and local Ollama, LM Studio, and vLLM servers.
 - Added generic OpenAI-compatible, native Anthropic Messages, and Azure OpenAI protocol adapters with capability-filtered request fields.
 - Added editable endpoints/models, connection tests, model discovery, and optional failover between saved profiles.
+- New profiles use numbered names such as “Configuration 1” and remain freely renameable without provider changes overwriting them; the active service cannot be selected as its own fallback.
+- Changed the main-window provider item to a display-only summary, disabled accidental wheel switching in the provider selector, and refined the white six-language settings layout without horizontal scrolling.
 - Stores each profile key separately with Windows DPAPI and migrates the legacy DeepSeek key.
 - Isolates translation cache entries by provider, protocol, endpoint, and model.
 - Routes BabelDOC smart PDF work only through compatible endpoints, while native Anthropic can use a compatible fallback or strict placement.
