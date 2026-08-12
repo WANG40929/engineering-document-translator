@@ -15,6 +15,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 
 from .cache import TranslationCache
 from .i18n import tr
+from .providers import ProviderProfile, models_url, normalize_url
 from .text_utils import (
     glossary_signature,
     has_internal_placeholder,
@@ -46,6 +47,21 @@ SEGMENT_MARKER_FLEX_RE = re.compile(
     r"\[\s*\[\s*UDT\s*[_\s-]*SEGMENT\s*[_\s-]*(\d{4})\s*\]\s*\]",
     re.IGNORECASE,
 )
+
+
+def _decode_json_content(content: object):
+    """Accept strict JSON and the fenced JSON returned by non-JSON-mode APIs."""
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, count=1, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text, count=1)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(text[start : end + 1])
+        raise
 RETRYABLE_HTTP_CODES = {408, 429, 500, 502, 503, 504}
 LONG_SEGMENT_BATCH_THRESHOLD = 1200
 
@@ -151,8 +167,14 @@ class DeepSeekTranslator:
         pure_target_language: bool = True,
         quality_review: bool = True,
         force_refresh: bool = False,
+        provider_id: str = "deepseek",
+        api_style: str = "openai",
+        supports_json_mode: bool = True,
+        supports_thinking_control: bool = True,
+        requires_api_key: bool = True,
+        azure_api_version: str = "2024-10-21",
     ):
-        if not api_key.strip():
+        if requires_api_key and not api_key.strip():
             raise ValueError(tr("error.api_key_required"))
         self.api_key = api_key.strip()
         self.model = model.strip() or "deepseek-v4-flash"
@@ -163,6 +185,12 @@ class DeepSeekTranslator:
         self.timeout = timeout
         self.batch_size = max(1, min(batch_size, 100))
         self.base_url = base_url
+        self.provider_id = provider_id
+        self.api_style = api_style
+        self.supports_json_mode = supports_json_mode
+        self.supports_thinking_control = supports_thinking_control
+        self.requires_api_key = requires_api_key
+        self.azure_api_version = azure_api_version
         self.pure_target_language = pure_target_language
         self.quality_review = quality_review
         self.force_refresh = force_refresh
@@ -189,15 +217,35 @@ class DeepSeekTranslator:
             "parallel_workers": self._worker_limit,
             "finish_reasons": {},
             "thinking_mode": "disabled",
+            "provider": self.provider_id,
         }
         policy = "|".join((
             CACHE_POLICY_VERSION,
+            self.provider_id,
+            self.api_style,
+            normalize_url(self.base_url),
             self.model,
             f"pure={int(self.pure_target_language)}",
             f"review={int(self.quality_review)}",
             glossary_signature(self.glossary),
         ))
         self._cache_signature = hashlib.sha256(policy.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def from_profile(cls, profile: ProviderProfile, api_key: str, **kwargs):
+        preset = profile.preset
+        return cls(
+            api_key=api_key,
+            model=profile.model,
+            base_url=profile.base_url,
+            provider_id=profile.provider,
+            api_style=profile.api_style,
+            supports_json_mode=preset.supports_json_mode,
+            supports_thinking_control=preset.supports_thinking_control,
+            requires_api_key=preset.requires_api_key,
+            azure_api_version=profile.azure_api_version,
+            **kwargs,
+        )
 
     def _automatic_worker_limit(self) -> int:
         """Choose safe network concurrency automatically; no quality tier."""
@@ -221,8 +269,15 @@ class DeepSeekTranslator:
             self.usage[key] = int(self.usage.get(key, 0)) + amount
 
     def _record_response_usage(self, payload: dict, finish_reason: str) -> None:
+        raw_usage = payload.get("usage", {})
+        if self.api_style == "anthropic":
+            raw_usage = {
+                "prompt_tokens": raw_usage.get("input_tokens", 0),
+                "completion_tokens": raw_usage.get("output_tokens", 0),
+                "total_tokens": raw_usage.get("input_tokens", 0) + raw_usage.get("output_tokens", 0),
+            }
         with self._usage_lock:
-            for key, value in payload.get("usage", {}).items():
+            for key, value in raw_usage.items():
                 if key in self.usage and isinstance(value, int):
                     self.usage[key] += value
             reasons = self.usage["finish_reasons"]
@@ -366,9 +421,7 @@ class DeepSeekTranslator:
             }
             for item in items
         ]
-        body = {
-            "model": self.model,
-            "messages": [
+        messages = [
                 {"role": "system", "content": system_prompt},
                 {
                     "role": "user",
@@ -377,12 +430,11 @@ class DeepSeekTranslator:
                         ensure_ascii=False,
                     ),
                 },
-            ],
+            ]
+        body = {
+            "model": self.model,
+            "messages": messages,
             "temperature": 0.1,
-            "response_format": {"type": "json_object"},
-            # V4 enables thinking by default. Translation is a deterministic
-            # transformation task, so thinking only adds latency and tokens.
-            "thinking": {"type": "disabled"},
             # Give JSON enough room while keeping accidental runaway output
             # bounded. DeepSeek may otherwise return a truncated JSON object.
             "max_tokens": max(
@@ -399,10 +451,40 @@ class DeepSeekTranslator:
             ),
             "stream": False,
         }
+        if self.supports_json_mode:
+            body["response_format"] = {"type": "json_object"}
+        if self.supports_thinking_control:
+            # DeepSeek V4 enables thinking by default; deterministic document
+            # translation does not benefit from the extra latency and tokens.
+            body["thinking"] = {"type": "disabled"}
+        headers = {"Content-Type": "application/json"}
+        endpoint = self.base_url
+        if self.api_style == "anthropic":
+            body = {
+                "model": self.model,
+                "system": system_prompt,
+                "messages": messages[1:],
+                "temperature": 0.1,
+                "max_tokens": body["max_tokens"],
+            }
+            headers.update({
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            })
+        elif self.api_style == "azure":
+            headers["api-key"] = self.api_key
+            if "api-version=" not in endpoint:
+                separator = "&" if "?" in endpoint else "?"
+                endpoint = f"{endpoint}{separator}api-version={self.azure_api_version}"
+            # Azure deployments identify the model in the URL. Some compatible
+            # gateways reject a second model identifier in the request body.
+            body.pop("model", None)
+        elif self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         request = urllib.request.Request(
-            self.base_url,
+            endpoint,
             data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+            headers=headers,
             method="POST",
         )
         last_error: Exception | None = None
@@ -413,13 +495,21 @@ class DeepSeekTranslator:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     payload = json.loads(response.read().decode("utf-8"))
                 self._bump_usage("requests")
-                choice = payload["choices"][0]
-                finish_reason = str(choice.get("finish_reason") or "unknown")
+                if self.api_style == "anthropic":
+                    finish_reason = str(payload.get("stop_reason") or "unknown")
+                    content = "".join(
+                        str(block.get("text", ""))
+                        for block in payload.get("content", [])
+                        if isinstance(block, dict) and block.get("type") == "text"
+                    )
+                else:
+                    choice = payload["choices"][0]
+                    finish_reason = str(choice.get("finish_reason") or "unknown")
+                    content = choice["message"]["content"]
                 self._record_response_usage(payload, finish_reason)
-                content = choice["message"]["content"]
                 requested_ids = {int(item["id"]) for item in items}
                 try:
-                    parsed = json.loads(content)
+                    parsed = _decode_json_content(content)
                     translations = (
                         parsed.get("translations", [])
                         if isinstance(parsed, dict)
@@ -508,7 +598,7 @@ class DeepSeekTranslator:
                 raise
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")[:1000]
-                last_error = DeepSeekError(f"DeepSeek HTTP {exc.code}: {self._redact_error(detail)}")
+                last_error = DeepSeekError(f"{self.provider_id} HTTP {exc.code}: {self._redact_error(detail)}")
                 if exc.code == 429:
                     retry_after = None
                     try:
@@ -539,6 +629,50 @@ class DeepSeekTranslator:
                 reason=self._redact_error(last_error),
             )
         )
+
+    def list_models(self) -> list[str]:
+        endpoint = models_url(
+            ProviderProfile(
+                id="runtime",
+                name=self.provider_id,
+                provider=self.provider_id,
+                api_style=self.api_style,
+                base_url=self.base_url,
+                model=self.model,
+                azure_api_version=self.azure_api_version,
+            )
+        )
+        if not endpoint:
+            return []
+        headers = {"Accept": "application/json"}
+        if self.api_style == "azure":
+            headers["api-key"] = self.api_key
+        elif self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        request = urllib.request.Request(endpoint, headers=headers, method="GET")
+        with urllib.request.urlopen(request, timeout=min(self.timeout, 30)) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return sorted(
+            str(item["id"])
+            for item in payload.get("data", [])
+            if isinstance(item, dict) and item.get("id")
+        )
+
+    def test_connection(self) -> tuple[bool, str]:
+        ok, message, _models = self.test_connection_details()
+        return ok, message
+
+    def test_connection_details(self) -> tuple[bool, str, list[str]]:
+        try:
+            models = self.list_models()
+            if models:
+                return True, f"{len(models)} models", models
+            # Providers without a model-list endpoint are verified with one
+            # tiny structured translation request.
+            self._request([{"id": 0, "text": "OK"}])
+            return True, "OK", []
+        except Exception as exc:
+            return False, self._redact_error(exc), []
 
     def _request_resilient(
         self,
@@ -794,3 +928,43 @@ class IdentityTranslator:
         if progress:
             progress(len(texts), len(texts))
         return list(texts)
+
+
+class FallbackTranslator:
+    """Use the fallback after the primary provider has a terminal API failure."""
+
+    supports_parallel_batches = True
+
+    def __init__(self, primary: DeepSeekTranslator, fallback: DeepSeekTranslator | None = None):
+        self.primary = primary
+        self.fallback = fallback
+        self._active = primary
+        self.fallback_used = False
+
+    def __getattr__(self, name):
+        return getattr(self._active, name)
+
+    @property
+    def usage(self) -> dict:
+        values = dict(self.primary.usage)
+        if self.fallback:
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens", "requests", "api_attempts"):
+                values[key] = int(values.get(key, 0)) + int(self.fallback.usage.get(key, 0))
+        values["fallback_used"] = self.fallback_used
+        return values
+
+    def translate_many(self, texts: Sequence[str], progress=None) -> list[str]:
+        try:
+            return self._active.translate_many(texts, progress)
+        except DeepSeekError:
+            if self._active is not self.primary or self.fallback is None:
+                raise
+            self._active = self.fallback
+            self.fallback_used = True
+            return self.fallback.translate_many(texts, progress)
+
+    def babeldoc_translator(self) -> DeepSeekTranslator | None:
+        for candidate in (self._active, self.fallback):
+            if candidate and candidate.api_style in {"openai", "azure"}:
+                return candidate
+        return None

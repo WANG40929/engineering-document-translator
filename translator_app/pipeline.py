@@ -184,6 +184,19 @@ class TranslationPipeline:
                     progress(str(source), sum(file_fractions) / max(total, 1), message)
 
             result = engine.translate(source, destination, translator, options, file_progress)
+            if engine is self.smart_pdf_engine and result.status == "failed":
+                smart_errors = list(result.errors)
+                result = self.strict_pdf_engine.translate(
+                    source, destination, translator, options, file_progress
+                )
+                if result.status == "completed":
+                    result.warnings.insert(
+                        0,
+                        tr(
+                            "warning.smart_pdf_fallback",
+                            reason=smart_errors[-1] if smart_errors else "",
+                        ),
+                    )
             results.append(result)
             if result.status == "completed":
                 file_fractions[index] = 1.0

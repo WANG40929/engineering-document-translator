@@ -5,7 +5,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -14,13 +14,22 @@ os.environ.setdefault("UDT_NO_SPLASH", "1")
 try:
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QCloseEvent
-    from PySide6.QtWidgets import QAbstractItemView, QApplication, QProgressBar
+    from PySide6.QtWidgets import (
+        QAbstractItemView,
+        QApplication,
+        QComboBox,
+        QLabel,
+        QProgressBar,
+        QScrollArea,
+    )
 
     from translator_app.config import AppConfig, ConfigStore
     from translator_app.i18n import I18n, set_language
     from translator_app.models import FileResult, TranslationOptions
     from translator_app.qt_gui import NoFocusRectDelegate, TranslatorWindow
+    from translator_app.providers import default_profile
     from translator_app.secret_store import SecretStore
+    from translator_app.settings_dialog import SettingsDialog
     from translator_app.task_queue import PreemptiveTaskQueue
 
     HAS_QT = True
@@ -70,6 +79,185 @@ class GuiTests(unittest.TestCase):
                     window.close()
                     window.deleteLater()
                     self.app.processEvents()
+
+    def test_provider_settings_support_multiple_profiles_in_scrollable_page(self):
+        config = AppConfig(ui_language="zh-CN")
+        dialog = SettingsDialog(config, {"deepseek-default": "test-key"}, True)
+        try:
+            self.assertGreaterEqual(dialog.provider_combo.count(), 18)
+            self.assertEqual(dialog.profile_combo.count(), 1)
+            self.assertFalse(dialog.remove_profile_button.isEnabled())
+            self.assertEqual(dialog.fallback_combo.count(), 1)
+            dialog._add_profile()
+            self.assertEqual(dialog.profile_combo.count(), 2)
+            self.assertTrue(dialog.remove_profile_button.isEnabled())
+            self.assertEqual(dialog.fallback_combo.count(), 2)
+            self.assertEqual(
+                dialog.fallback_combo.findData(dialog.profile_combo.currentData()),
+                -1,
+            )
+            values = dialog.values()
+            self.assertEqual(len(values["provider_profiles"]), 2)
+            self.assertIn("api_keys", values)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            self.app.processEvents()
+
+    def test_added_profiles_use_numbered_names_and_keep_custom_name_on_provider_change(self):
+        set_language("en")
+        dialog = SettingsDialog(
+            AppConfig(ui_language="en"),
+            {"deepseek-default": "test-key"},
+            True,
+        )
+        try:
+            dialog._add_profile()
+            self.assertEqual(dialog.profile_combo.itemText(0), "Configuration 1")
+            self.assertEqual(dialog.profile_combo.itemText(1), "Configuration 2")
+
+            dialog.profile_name_edit.setText("Urgent translation API")
+            dialog._profile_name_edited("Urgent translation API")
+            openai_index = dialog.provider_combo.findData("openai")
+            dialog.provider_combo.setCurrentIndex(openai_index)
+
+            self.assertEqual(dialog.profile_name_edit.text(), "Urgent translation API")
+            self.assertEqual(dialog.profile_combo.currentText(), "Urgent translation API")
+            self.assertEqual(
+                dialog.values()["provider_profiles"][1]["name"],
+                "Urgent translation API",
+            )
+        finally:
+            set_language("auto")
+            dialog.close()
+            dialog.deleteLater()
+            self.app.processEvents()
+
+    def test_api_provider_combo_ignores_mouse_wheel_changes(self):
+        dialog = SettingsDialog(
+            AppConfig(ui_language="zh-CN"),
+            {"deepseek-default": "test-key"},
+            True,
+        )
+        try:
+            original_index = dialog.provider_combo.currentIndex()
+            event = Mock()
+            dialog.provider_combo.wheelEvent(event)
+            event.ignore.assert_called_once_with()
+            self.assertEqual(dialog.provider_combo.currentIndex(), original_index)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            self.app.processEvents()
+
+    def test_settings_pages_use_white_surface_instead_of_gray_viewport(self):
+        dialog = SettingsDialog(
+            AppConfig(ui_language="zh-CN"),
+            {"deepseek-default": "test-key"},
+            True,
+        )
+        try:
+            scroll = dialog.findChild(QScrollArea, "settingsScroll")
+            self.assertIsNotNone(scroll)
+            self.assertEqual(scroll.widget().objectName(), "settingsPage")
+            self.assertIn("QDialog { background: #ffffff;", dialog.styleSheet())
+            self.assertNotIn("#f5f7fb", dialog.styleSheet())
+            self.assertIn("chevron-down.svg", dialog.styleSheet())
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            self.app.processEvents()
+
+    def test_settings_dialog_stays_compact_without_horizontal_scroll_in_all_languages(self):
+        try:
+            for language in ("zh-CN", "en", "ru", "es", "fr", "de"):
+                with self.subTest(language=language):
+                    set_language(language)
+                    dialog = SettingsDialog(
+                        AppConfig(ui_language=language),
+                        {"deepseek-default": "test-key"},
+                        True,
+                    )
+                    try:
+                        dialog.show()
+                        self.app.processEvents()
+                        scroll = dialog.findChild(QScrollArea, "settingsScroll")
+                        self.assertEqual(dialog.width(), 700)
+                        self.assertEqual(scroll.horizontalScrollBar().maximum(), 0)
+                    finally:
+                        dialog.close()
+                        dialog.deleteLater()
+                        self.app.processEvents()
+        finally:
+            set_language("auto")
+
+    def test_settings_fallback_never_offers_the_active_profile(self):
+        dialog = SettingsDialog(
+            AppConfig(ui_language="zh-CN"),
+            {"deepseek-default": "test-key"},
+            True,
+        )
+        try:
+            original_id = dialog.profile_combo.currentData()
+            dialog._add_profile()
+            added_id = dialog.profile_combo.currentData()
+            self.assertNotEqual(original_id, added_id)
+            self.assertGreaterEqual(dialog.fallback_combo.findData(original_id), 0)
+            self.assertEqual(dialog.fallback_combo.findData(added_id), -1)
+
+            dialog.profile_combo.setCurrentIndex(dialog.profile_combo.findData(original_id))
+            self.assertEqual(dialog.fallback_combo.findData(original_id), -1)
+            self.assertGreaterEqual(dialog.fallback_combo.findData(added_id), 0)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            self.app.processEvents()
+
+    def test_settings_validation_marks_an_invalid_endpoint_before_saving(self):
+        dialog = SettingsDialog(
+            AppConfig(ui_language="zh-CN"),
+            {"deepseek-default": "test-key"},
+            True,
+        )
+        try:
+            dialog.base_url_edit.setText("not-an-api-url")
+            with patch("translator_app.settings_dialog.QMessageBox.warning") as warning:
+                dialog.accept()
+            warning.assert_called_once()
+            self.assertTrue(dialog.base_url_edit.property("invalid"))
+            self.assertEqual(dialog.result(), 0)
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            self.app.processEvents()
+
+    def test_connection_result_does_not_replace_another_profiles_model(self):
+        dialog = SettingsDialog(
+            AppConfig(ui_language="zh-CN"),
+            {"deepseek-default": "test-key"},
+            True,
+        )
+        try:
+            original_id = dialog.profile_combo.currentData()
+            dialog._add_profile()
+            tested_id = dialog.profile_combo.currentData()
+            dialog.profile_combo.setCurrentIndex(dialog.profile_combo.findData(original_id))
+            current_model = dialog.model_edit.currentText()
+
+            with patch("translator_app.settings_dialog.QMessageBox.information"):
+                dialog._connection_test_finished(
+                    tested_id,
+                    True,
+                    "OK",
+                    ["model-from-other-profile"],
+                )
+
+            self.assertEqual(dialog.model_edit.currentText(), current_model)
+            self.assertNotEqual(dialog.model_edit.currentText(), "model-from-other-profile")
+        finally:
+            dialog.close()
+            dialog.deleteLater()
+            self.app.processEvents()
 
     def test_runtime_language_switch_retranslates_existing_task_cells(self):
         window = self._window("zh-CN")
@@ -159,6 +347,18 @@ class GuiTests(unittest.TestCase):
                 window.drop_zone.geometry().bottom(),
                 window.table.geometry().top(),
             )
+        finally:
+            window.close()
+            window.deleteLater()
+            self.app.processEvents()
+
+    def test_provider_summary_is_display_only_without_dropdown(self):
+        window = self._window("zh-CN")
+        try:
+            self.assertIsInstance(window.provider_summary, QLabel)
+            self.assertNotIsInstance(window.provider_summary, QComboBox)
+            self.assertIn(window.saved.active_profile().name, window.provider_summary.text())
+            self.assertFalse(hasattr(window, "model_combo"))
         finally:
             window.close()
             window.deleteLater()
@@ -318,7 +518,7 @@ class GuiTests(unittest.TestCase):
                 ]
 
             with (
-                patch("translator_app.deepseek.DeepSeekTranslator", return_value=object()),
+                patch("translator_app.deepseek.DeepSeekTranslator.from_profile", return_value=object()),
                 patch("translator_app.cache.TranslationCache", return_value=object()),
                 patch("translator_app.text_utils.load_glossary", return_value={}),
                 patch("translator_app.pipeline.TranslationPipeline.run", new=fake_run),
@@ -328,9 +528,11 @@ class GuiTests(unittest.TestCase):
                 ),
                 patch("translator_app.qt_gui.QMessageBox.information"),
             ):
+                profile = default_profile()
+                window.api_keys[profile.id] = "test-key"
                 window._worker(
                     window.run_queue,
-                    "test-key",
+                    profile,
                     TranslationOptions(output_dir=root),
                 )
 

@@ -155,7 +155,7 @@
       <h2>快速开始</h2>
       <ol class="steps">
         <li>双击 <code>DocumentTranslator.exe</code>。第一次启动后打开右上角“设置”。</li>
-        <li>填写 DeepSeek API Key，确认接口地址和模型，然后保存。API Key 不包含在软件包中。</li>
+        <li>选择 API 供应商，填写自己的 API Key，确认接口地址和模型，然后保存。API Key 不包含在软件包中。</li>
         <li>将 PDF、Word、Excel 或 CSV 文件拖入窗口，也可以点击选择文件。</li>
         <li>确认源语言、目标语言和输出目录，点击“开始翻译”。</li>
         <li>任务完成后点击“打开”查看译文，或点击“打开文件夹”定位输出文件。</li>
@@ -168,6 +168,9 @@
         <strong>推荐：</strong>PDF 模式保持“自动选择”。软件会根据页面内容选择智能排版或原位保版；
         Word、Excel、CSV 不使用 BabelDOC 引擎。
       </div>
+      <h3>API 供应商与备用服务</h3>
+      <p>内置 DeepSeek、OpenAI、Anthropic Claude、Google Gemini、阿里云百炼/Qwen、Azure OpenAI、Moonshot/Kimi、智谱 GLM、火山方舟/豆包、SiliconFlow、OpenRouter、Mistral、Groq、Together AI，以及本地 Ollama、LM Studio、vLLM。还可填写任意 OpenAI-compatible 接口。</p>
+      <p>每个服务配置独立保存接口、模型和 Windows 加密的 API Key。可以设置故障备用服务。缓存会按供应商、协议、接口和模型隔离。软件显示服务端实际返回的 token，不估算费用。</p>
     </section>
 
     <section id="editions">
@@ -214,7 +217,7 @@
       <h3>自动选择（推荐）</h3>
       <p>正文较多的报告、手册和论文优先使用智能排版；图纸、铭牌和短标签 PDF 优先使用原位保版。完整版找不到智能引擎时会显示明确提示。</p>
       <h3>智能排版</h3>
-      <p>使用 BabelDOC 分析段落、字体和页面结构，再将 DeepSeek 的译文放回页面。适合连续正文。v1.4.4 会在生成后逐页检查半字裁切、横线遮字、孤立源文残片、文字行重叠、结构行异常合并、文字分布和异常小字号；提示框使用完整可用区域，真正的表格仍保持单元格边界。每个修复页会再次验收，仍有问题就回滚，不会覆盖原本更可读的智能排版页。</p>
+      <p>使用 BabelDOC 分析段落、字体和页面结构，再将所选模型服务的译文放回页面。适合连续正文。v1.5.0 支持多个 API 服务配置；BabelDOC 需要 OpenAI-compatible 接口，原生 Anthropic 可配置兼容备用服务或使用原位保版。生成后会逐页检查裁切、遮字、残留源文、文字行重叠、结构异常和小字号。</p>
       <h3>原位保版</h3>
       <p>尽量在原文字坐标处替换内容。适合工程图纸、表格、铭牌和版面位置不能变化的文件。</p>
       <p>PDF 可以生成纯译文、双语对照，或同时生成两者。图片内部的文字默认不会 OCR 翻译。</p>
@@ -259,7 +262,7 @@
       <h3>提示没有智能 PDF 引擎</h3>
       <p>完整版请确认 <code>TranslationEngine</code> 与主程序在同一目录。轻量版请按上一节安装，并在设置中选择 <code>babeldoc.exe</code>。</p>
       <h3>进度一段时间没有变化</h3>
-      <p>查看任务阶段文字。版面模型首次载入、DeepSeek 网络响应或大页重新排版可能需要时间；只有软件明确报告停滞或失败时才需要重试。</p>
+      <p>查看任务阶段文字。版面模型首次载入、模型服务网络响应或大页重新排版可能需要时间；只有软件明确报告停滞或失败时才需要重试。</p>
       <h3>翻译文件在哪里？</h3>
       <p>输出目录显示在主界面顶部。完成后可直接点击任务右侧的“打开”或“打开文件夹”。</p>
       <h3>API Key 会随安装包公开吗？</h3>
@@ -271,12 +274,15 @@
       <p><strong>Version:</strong> {{VERSION}} · <strong>Edition:</strong> {{EDITION}}</p>
       <ol class="steps">
         <li>Run <code>DocumentTranslator.exe</code>.</li>
-        <li>Open Settings, enter your own DeepSeek API key, verify the endpoint and model, and save.</li>
+        <li>Open Settings, choose an API provider, enter your own key, verify the endpoint and model, and save.</li>
         <li>Drag PDF, Word, Excel, or CSV files into the window.</li>
         <li>Choose source language, target language, and output folder, then select Start Translation.</li>
         <li>When complete, use Open File or Open Folder beside the task.</li>
       </ol>
       <p><strong>Urgent priority:</strong> select the upward arrow beside an urgent file. The application pauses the active file at a safe checkpoint, finishes the urgent file first, then resumes the original file from cache.</p>
+      <h3>API providers and fallback</h3>
+      <p>Built-in profiles cover DeepSeek, OpenAI, Anthropic Claude, Google Gemini, Alibaba Model Studio/Qwen, Azure OpenAI, Moonshot/Kimi, Zhipu GLM, Volcengine Ark/Doubao, SiliconFlow, OpenRouter, Mistral, Groq, Together AI, and local Ollama, LM Studio, and vLLM. Any OpenAI-compatible endpoint can also be entered manually.</p>
+      <p>Each profile has a separate endpoint, model, and Windows-encrypted key. An optional failure fallback can be selected. Cache namespaces are isolated by provider, protocol, endpoint, and model. Actual returned tokens are recorded; prices are not estimated.</p>
       <h3>Editions</h3>
       <ul>
         <li><strong>Setup Full:</strong> recommended; installs the application and bundled BabelDOC smart-PDF engine.</li>
@@ -292,7 +298,7 @@
       <h3>Install BabelDOC for the Lite edition</h3>
       <p>Install 64-bit Python 3.12, run the four PowerShell commands in the Chinese section above, then select the resulting <code>babeldoc.exe</code> under Settings → Advanced.</p>
       <h3>Privacy</h3>
-      <p>Release packages contain no API key, user configuration, translation cache, report, or source document. DeepSeek usage and charges are governed by the API account configured by the user.</p>
+      <p>Release packages contain no API key, user configuration, translation cache, report, or source document. Usage and charges are governed by the provider account configured by the user; the application does not estimate prices.</p>
     </section>
   </main>
 

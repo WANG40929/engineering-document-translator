@@ -23,7 +23,7 @@ Build all three editions
 From the project root:
 
   powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 `
-    -Version 1.4.4 `
+    -Version 1.5.0 `
     -BabelDocSource "C:\path\to\existing-full-edition"
 
 The source directory is only read. The script never edits or removes it.
@@ -31,16 +31,16 @@ The source directory is only read. The script never edits or removes it.
 Expected output
 ---------------
 
-  release\DocumentTranslator-v1.4.4-Windows-Setup-Full.exe
-  release\DocumentTranslator-v1.4.4-Windows-Portable-Full.zip
-  release\DocumentTranslator-v1.4.4-Windows-Portable-Lite.zip
+  release\DocumentTranslator-v1.5.0-Windows-Setup-Full.exe
+  release\DocumentTranslator-v1.5.0-Windows-Portable-Full.zip
+  release\DocumentTranslator-v1.5.0-Windows-Portable-Lite.zip
   release\SHA256SUMS.txt
 
 Build only Portable Lite
 ------------------------
 
   powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 `
-    -Version 1.4.4 -LiteOnly -SkipInstaller
+    -Version 1.5.0 -LiteOnly -SkipInstaller
 
 Inspect staging before it is removed
 ------------------------------------

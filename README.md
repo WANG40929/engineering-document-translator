@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">文档智能翻译器</h1>
-<h3 align="center">Document Translator · v1.4.4</h3>
+<h3 align="center">Document Translator · v1.5.0</h3>
 
 <p align="center">
   保留版式、保护技术编号，批量翻译 PDF、Word、Excel 和 CSV 等文档。<br>
@@ -33,7 +33,7 @@
 
 ### 选择下载版本
 
-v1.4.4 提供三种 Windows 版本：
+v1.5.0 提供三种 Windows 版本：
 
 | 版本 | 包含 BabelDOC 智能 PDF 引擎 | 适合谁 |
 |---|---:|---|
@@ -45,10 +45,12 @@ v1.4.4 提供三种 Windows 版本：
 
 安装包和压缩包名称均使用英文、数字等 ASCII 字符，避免在不同解压软件中出现乱码。每个发布包都提供浏览器可直接打开的 `ReadMe.html` 和普通文本 `ReadMe.txt`，不要求用户会打开 Markdown 文件。详细区别和 Lite 版安装引擎的方法见 [下载版本说明](docs/DOWNLOADS.md)。
 
+多供应商地址、Azure 部署写法、本地模型和智能 PDF 兼容说明见 [API 供应商配置](docs/API_PROVIDERS.md)。
+
 ### 开始使用
 
 1. 从 [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest) 选择上面的一种 Windows 安装包或压缩包。
-2. 打开软件，在“设置”中填写自己的 DeepSeek API Key，并选择目标语言。
+2. 打开软件，在“设置”中选择 API 供应商、模型并填写自己的 API Key，然后选择目标语言。
 3. 拖入文件或文件夹，点击“开始翻译”。
 4. 完成后直接点击“打开文件”或“打开文件夹”查看结果。
 
@@ -75,7 +77,20 @@ v1.4.4 提供三种 Windows 版本：
 
 只翻译已有文字层；扫描图片、PDF 转曲文字和没有文字层的页面不会翻译。
 
-### v1.4.4 重点改进
+### v1.5.0 重点改进
+
+- **不再绑定 DeepSeek：** 内置 DeepSeek、OpenAI、Anthropic Claude、Google Gemini、阿里云百炼/Qwen、Azure OpenAI、Moonshot/Kimi、智谱 GLM、火山方舟/豆包、SiliconFlow、OpenRouter、Mistral、Groq 和 Together AI 配置。
+- **兼容任意 OpenAI 接口：** 可填写自定义 OpenAI-compatible 地址，也支持本机 Ollama、LM Studio 和 vLLM。
+- **多服务配置：** 每个服务独立保存接口地址、模型和经 Windows DPAPI 加密的 API Key；可以设置主服务与故障备用服务。
+- **连接检测：** 在设置中测试连接、自动读取服务端模型列表；不支持列表接口时仍可手动输入模型或部署名称。
+- **严格缓存隔离：** 供应商、协议、接口地址或模型不同就使用不同缓存命名空间，避免不同模型之间串用译文。
+- **不内置价格估算：** 软件只记录服务端真实返回的 token 用量，不维护可能随时失效的价格表。
+
+### 支持的 API 服务
+
+大多数服务使用 OpenAI-compatible 协议；Anthropic 使用原生 Messages API，Azure OpenAI 使用部署端点与 `api-key` 认证。预设只负责填入常用地址，所有地址和模型均可修改。智能 PDF 的 BabelDOC 后端需要 OpenAI-compatible 接口；使用 Anthropic 原生接口时，请配置一个兼容接口作为备用服务，或选择“原位保版”。
+
+### v1.4.4 PDF 质量改进
 
 - **裁切与残字检测：** 可识别连续半字裁切、横线遮字以及孤立的 `e`、`s` 等源文残片。
 - **正文行距稳定：** 中文换行使用更安全的行距，粗体标题与正文保持独立，不再互相压叠。
@@ -97,7 +112,7 @@ v1.4.4 提供三种 Windows 版本：
 
 “智能排版”使用 [BabelDOC](https://github.com/funstory-ai/BabelDOC)，适合报告、手册和连续正文；v1.4.0 会在其输出后逐页自检，并只对命中的问题页使用自适应原位排版修复。“原位保版”仍适合工程图纸、图签、设备标签和短文本。Setup Full 和 Portable Full 已包含 BabelDOC；Portable Lite 找不到该引擎时会安全回退到原位保版。
 
-BabelDOC 的程序、布局模型和字体不属于 100 MB 译文缓存，也不会被缓存清理。API Key 仅通过任务临时配置传递，任务结束后删除，并从错误信息中脱敏。
+BabelDOC 的程序、布局模型和字体不属于 100 MB 译文缓存，也不会被缓存清理。各服务的 API Key 使用 Windows DPAPI 分别加密；智能 PDF 任务只通过临时配置传递当前所需密钥，结束后删除，并从错误信息中脱敏。
 
 软件支持 CSV、TSV、TXT 和 XLSX 术语表。用户选择的术语表会被记住，并在后续文件中继续使用。智能 PDF 可进行当前文档内的术语提取，但本版本**不会自动建立并永久积累一个可审核的术语库**；译文缓存也不等于术语库。
 
@@ -137,7 +152,7 @@ python -m translator_app
 
 ### Choose a download
 
-Version 1.4.4 provides three Windows editions:
+Version 1.5.0 provides three Windows editions:
 
 | Edition | BabelDOC smart PDF engine included | Recommended for |
 |---|---:|---|
@@ -149,10 +164,12 @@ The setup wizard supports Simplified Chinese, English, Russian, Spanish, French,
 
 Package and archive names use ASCII characters to prevent garbled filenames in older archive tools. Every package contains a browser-friendly `ReadMe.html` and plain-text `ReadMe.txt`; users do not need a Markdown reader. See [Download Editions](docs/DOWNLOADS.md) for details and Lite-edition engine setup.
 
+See [API Provider Setup](docs/API_PROVIDERS.md) for endpoints, Azure deployment URLs, local servers, fallback behavior, and smart PDF compatibility.
+
 ### Get started
 
 1. Choose a Windows installer or portable archive from [Releases](https://github.com/WANG40929/engineering-document-translator/releases/latest).
-2. Open the application, enter your DeepSeek API key under **Settings**, and select a target language.
+2. Open **Settings**, select an API provider and model, enter your own API key, and choose a target language.
 3. Drop files or folders into the window and click **Start Translation**.
 4. When a task finishes, use **Open file** or **Open folder** to view the result.
 
@@ -172,7 +189,18 @@ Source files are never overwritten; translated files receive a language suffix. 
 
 Only existing text layers are translated. Scanned images, outlined PDF text, and pages without a text layer are left unchanged.
 
-### Version 1.4.4 highlights
+### Version 1.5.0 highlights
+
+- **Provider-independent:** presets for DeepSeek, OpenAI, Anthropic Claude, Google Gemini, Alibaba Model Studio/Qwen, Azure OpenAI, Moonshot/Kimi, Zhipu GLM, Volcengine Ark/Doubao, SiliconFlow, OpenRouter, Mistral, Groq, and Together AI.
+- **Any OpenAI-compatible service:** custom endpoints plus local Ollama, LM Studio, and vLLM servers.
+- **Multiple service profiles:** separate endpoint, model, and Windows DPAPI-encrypted API key per profile, with an optional failure fallback.
+- **Connection test and model discovery:** load model IDs when the provider exposes a model-list endpoint; manual model or deployment names remain available.
+- **Strict cache isolation:** provider, protocol, endpoint, and model are all part of the cache namespace.
+- **No price estimator:** the application records actual token usage returned by the provider but does not ship a price table that can become stale.
+
+Most services use the OpenAI-compatible protocol. Anthropic uses its native Messages API, while Azure OpenAI uses deployment endpoints and `api-key` authentication. BabelDOC smart PDF mode requires an OpenAI-compatible endpoint; when using native Anthropic, configure a compatible fallback or choose strict placement.
+
+### Version 1.4.4 PDF quality highlights
 
 - **Clipping and debris detection:** identifies continuous half-glyph clipping, rule-obscured text, and isolated source fragments such as `e` or `s`.
 - **Stable body leading:** safer CJK line spacing and separate heading/body flows prevent text from painting over adjacent lines.
@@ -194,7 +222,7 @@ Only existing text layers are translated. Scanned images, outlined PDF text, and
 
 Smart layout uses [BabelDOC](https://github.com/funstory-ai/BabelDOC) for reports, manuals, and prose-heavy documents. Version 1.4.0 checks its output page by page and selectively repairs flagged pages with adaptive in-place placement. Strict placement remains available for drawings, title blocks, equipment labels, and short text. Windows Setup Full and Portable Full include BabelDOC. Portable Lite falls back safely to strict placement when the engine is unavailable.
 
-BabelDOC, its layout models, and fonts are application resources, not part of the 100 MB translation cache. The API key is passed through a per-task temporary configuration, deleted after the task, and redacted from backend errors.
+BabelDOC, its layout models, and fonts are application resources, not part of the 100 MB translation cache. Provider keys are stored separately with Windows DPAPI; smart PDF tasks receive only the required key through a temporary configuration that is deleted afterward, and backend errors are redacted.
 
 User-supplied glossaries can be CSV, TSV, TXT, or XLSX. The selected glossary is remembered and reused for later files. Smart PDF mode can extract terms within the current document, but v1.4.0 **does not automatically build a permanent, reviewable terminology library**. The translation cache is not a terminology database.
 

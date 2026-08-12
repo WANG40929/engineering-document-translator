@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import json
 import os
 from ctypes import wintypes
 from pathlib import Path
@@ -17,8 +18,9 @@ class DATA_BLOB(ctypes.Structure):
 class SecretStore:
     """Store the API key using Windows DPAPI; never write plaintext to disk."""
 
-    def __init__(self, path: Path | None = None):
+    def __init__(self, path: Path | None = None, env_name: str | None = "DEEPSEEK_API_KEY"):
         self.path = path or app_data_dir() / "deepseek.key"
+        self.env_name = env_name
 
     @staticmethod
     def _blob(data: bytes):
@@ -63,7 +65,7 @@ class SecretStore:
         self.path.write_bytes(base64.b64encode(encrypted))
 
     def load(self) -> str:
-        env_key = os.environ.get("DEEPSEEK_API_KEY")
+        env_key = os.environ.get(self.env_name, "") if self.env_name else ""
         if env_key:
             return env_key
         if not self.path.exists():
@@ -97,3 +99,58 @@ class SecretStore:
     def clear(self) -> None:
         if self.path.exists():
             self.path.unlink()
+
+
+class ProviderSecretStore:
+    """DPAPI-encrypted API keys indexed by provider profile id."""
+
+    def __init__(self, path: Path | None = None, legacy: SecretStore | None = None):
+        self.path = path or app_data_dir() / "provider-keys.dat"
+        self._encrypted = SecretStore(self.path, env_name=None)
+        self.legacy = legacy or SecretStore()
+
+    def load_all(self) -> dict[str, str]:
+        try:
+            raw = self._encrypted.load()
+            values = json.loads(raw) if raw else {}
+            if raw and isinstance(values, dict):
+                return {str(key): str(value) for key, value in values.items() if value}
+        except (ValueError, TypeError, json.JSONDecodeError, OSError):
+            pass
+        try:
+            legacy_key = self.legacy.load()
+        except (ValueError, TypeError, OSError):
+            legacy_key = ""
+        return {"deepseek-default": legacy_key} if legacy_key else {}
+
+    def save_all(self, values: dict[str, str]) -> None:
+        clean = {str(key): str(value).strip() for key, value in values.items() if str(value).strip()}
+        if clean:
+            self._encrypted.save(json.dumps(clean, ensure_ascii=False, sort_keys=True))
+            if self.legacy.path != self._encrypted.path:
+                self.legacy.clear()
+        else:
+            self._encrypted.clear()
+            if self.legacy.path != self._encrypted.path:
+                self.legacy.clear()
+
+    def load(self, profile_id: str) -> str:
+        return self.load_all().get(profile_id, "")
+
+    def save(self, profile_id: str, secret: str) -> None:
+        values = self.load_all()
+        if secret.strip():
+            values[profile_id] = secret.strip()
+        else:
+            values.pop(profile_id, None)
+        self.save_all(values)
+
+    def clear(self, profile_id: str | None = None) -> None:
+        if profile_id is None:
+            self._encrypted.clear()
+            if self.legacy.path != self._encrypted.path:
+                self.legacy.clear()
+            return
+        values = self.load_all()
+        values.pop(profile_id, None)
+        self.save_all(values)

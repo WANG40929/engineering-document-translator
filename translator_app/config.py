@@ -5,6 +5,8 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .providers import ProviderProfile, default_profile
+
 
 APP_NAME = "UniversalDocumentTranslator"
 
@@ -40,7 +42,24 @@ class AppConfig:
     pdf_mode: str = "auto"
     pdf_output: str = "mono"
     babeldoc_path: str = ""
-    config_version: int = 4
+    provider_profiles: list[dict] | None = None
+    active_provider_id: str = "deepseek-default"
+    fallback_provider_id: str = ""
+    config_version: int = 5
+
+    def profiles(self) -> list[ProviderProfile]:
+        raw = self.provider_profiles or [default_profile(self.model).to_dict()]
+        profiles = [ProviderProfile.from_dict(item) for item in raw if isinstance(item, dict)]
+        return profiles or [default_profile(self.model)]
+
+    def active_profile(self) -> ProviderProfile:
+        profiles = self.profiles()
+        return next((item for item in profiles if item.id == self.active_provider_id), profiles[0])
+
+    def fallback_profile(self) -> ProviderProfile | None:
+        if not self.fallback_provider_id:
+            return None
+        return next((item for item in self.profiles() if item.id == self.fallback_provider_id), None)
 
 
 class ConfigStore:
@@ -65,7 +84,12 @@ class ConfigStore:
                 allowed.setdefault("babeldoc_path", "")
             if int(data.get("config_version", 0)) < 4:
                 allowed.setdefault("ui_language", "auto")
-            allowed["config_version"] = 4
+            if int(data.get("config_version", 0)) < 5:
+                profile = default_profile(str(allowed.get("model") or "deepseek-v4-flash"))
+                allowed.setdefault("provider_profiles", [profile.to_dict()])
+                allowed.setdefault("active_provider_id", profile.id)
+                allowed.setdefault("fallback_provider_id", "")
+            allowed["config_version"] = 5
             return AppConfig(**allowed)
         except Exception:
             return AppConfig()

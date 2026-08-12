@@ -426,7 +426,7 @@ class CoreTests(unittest.TestCase):
         config = ConfigStore(path).load()
         self.assertEqual(config.pdf_mode, "auto")
         self.assertEqual(config.pdf_output, "mono")
-        self.assertEqual(config.config_version, 4)
+        self.assertEqual(config.config_version, 5)
 
     def test_folder_import_skips_generated_outputs_for_every_supported_language(self):
         source = self.root / "manual.pdf"

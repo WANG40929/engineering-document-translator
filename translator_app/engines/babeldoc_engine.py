@@ -331,6 +331,15 @@ class BabelDocEngine(TranslationEngine):
         return 4
 
     def _write_config(self, path: Path, translator, options: TranslationOptions) -> None:
+        resolver = getattr(translator, "babeldoc_translator", None)
+        if callable(resolver):
+            compatible = resolver()
+            if compatible is None:
+                raise RuntimeError(
+                    "The selected provider has no OpenAI-compatible endpoint for smart PDF mode. "
+                    "Choose an OpenAI-compatible fallback provider or use strict PDF mode."
+                )
+            translator = compatible
         base_url = getattr(translator, "base_url", "https://api.deepseek.com")
         if base_url.endswith("/chat/completions"):
             base_url = base_url[: -len("/chat/completions")]
@@ -340,7 +349,6 @@ class BabelDocEngine(TranslationEngine):
             "openai-model": options.model,
             "openai-base-url": base_url,
             "openai-api-key": getattr(translator, "api_key", ""),
-            "openai-thinking": "disabled",
             "watermark-output-mode": "no_watermark",
             "report-interval": 0.25,
             "qps": workers,
@@ -349,6 +357,8 @@ class BabelDocEngine(TranslationEngine):
             "auto-enable-ocr-workaround": True,
             "max-pages-per-part": 40,
         }
+        if getattr(translator, "supports_thinking_control", False):
+            values["openai-thinking"] = "disabled"
         lines = ["[babeldoc]"]
         for key, value in values.items():
             if isinstance(value, bool):
