@@ -693,8 +693,11 @@ class TranslatorWindow(QMainWindow):
         language_box.addStretch()
         summary_layout.addWidget(language_group, 3)
         summary_layout.addWidget(self._separator())
-        self.model_combo = QComboBox()
-        self.model_combo.setEditable(True)
+        self.provider_summary = QLabel()
+        self.provider_summary.setObjectName("providerSummary")
+        self.provider_summary.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.provider_summary.setMinimumWidth(164)
+        self.provider_summary.setMaximumWidth(270)
         active_profile = self.saved.active_profile()
         self._set_provider_summary(active_profile)
         model_group = QWidget()
@@ -703,7 +706,7 @@ class TranslatorWindow(QMainWindow):
         model_box.setSpacing(5)
         model_box.addStretch()
         model_box.addWidget(SvgGlyph("brain.svg", 24))
-        model_box.addWidget(self.model_combo)
+        model_box.addWidget(self.provider_summary)
         model_box.addStretch()
         summary_layout.addWidget(model_group, 3)
         summary_layout.addWidget(self._separator())
@@ -793,6 +796,7 @@ class TranslatorWindow(QMainWindow):
             #versionBadge { color: #536174; background: #f6f8fb; border: 1px solid #d7dee8; border-radius: 6px; padding: 3px 7px; }
             #summaryPanel { background: #ffffff; border: 1px solid #dce2eb; border-radius: 6px; }
             #summaryPanel QComboBox { min-height: 28px; background: transparent; border: none; padding: 2px 5px; font-size: 14px; }
+            #providerSummary { min-height: 28px; background: transparent; border: none; padding: 2px 5px; font-size: 14px; color: #182131; }
             #summaryButton { min-height: 26px; text-align: left; background: transparent; border: none; color: #23324a; padding: 1px 4px; font-weight: 600; }
             #summaryButton:hover { color: #1f67e8; }
             #summaryIcon { color: #647184; font-size: 18px; }
@@ -832,7 +836,6 @@ class TranslatorWindow(QMainWindow):
         """)
         self._fit_combo_to_text(self.source_combo, 86, 150)
         self._fit_combo_to_text(self.target_combo, 94, 150)
-        self._fit_combo_to_text(self.model_combo, 164, 250)
         self._update_file_count()
         self._create_resize_handles(root)
 
@@ -892,12 +895,8 @@ class TranslatorWindow(QMainWindow):
     def _set_provider_summary(self, profile, model=None):
         model = str(model or profile.model).strip()
         label = f"{profile.name} · {model}" if model else profile.name
-        self.model_combo.blockSignals(True)
-        self.model_combo.clear()
-        self.model_combo.addItem(label, model)
-        self.model_combo.setCurrentIndex(0)
-        self.model_combo.setToolTip(label)
-        self.model_combo.blockSignals(False)
+        self.provider_summary.setText(label)
+        self.provider_summary.setToolTip(label)
 
     @staticmethod
     def _populate_language_combo(combo, allow_auto, selected):
@@ -928,8 +927,7 @@ class TranslatorWindow(QMainWindow):
         self._populate_language_combo(self.source_combo, True, source)
         self._populate_language_combo(self.target_combo, False, target)
 
-        custom_model = self.model_combo.currentData() or self.model_combo.currentText()
-        self._set_provider_summary(self.saved.active_profile(), custom_model)
+        self._set_provider_summary(self.saved.active_profile())
 
         headers = (
             tr("main.tasks_count", count=self.table.rowCount()),
@@ -966,7 +964,6 @@ class TranslatorWindow(QMainWindow):
         self._update_output_button()
         self._fit_combo_to_text(self.source_combo, 86, 170)
         self._fit_combo_to_text(self.target_combo, 94, 170)
-        self._fit_combo_to_text(self.model_combo, 164, 270)
 
     def _toggle_maximize(self):
         if self.isMaximized():
@@ -1007,12 +1004,6 @@ class TranslatorWindow(QMainWindow):
         self.output_button.setToolTip(value or tr("main.output_original_tooltip"))
 
     def _open_settings(self):
-        active = self.saved.active_profile()
-        active.model = self.model_combo.currentData() or self.model_combo.currentText().strip() or active.model
-        self.saved.provider_profiles = [
-            active.to_dict() if item.id == active.id else item.to_dict()
-            for item in self.saved.profiles()
-        ]
         dialog = SettingsDialog(self.saved, self.api_keys, self.save_key_enabled, self)
         if not dialog.exec():
             return
@@ -1454,7 +1445,6 @@ class TranslatorWindow(QMainWindow):
             )
             return
         profile = self.saved.active_profile()
-        profile.model = self.model_combo.currentData() or self.model_combo.currentText().strip() or profile.model
         key = self.api_keys.get(profile.id, "").strip()
         if profile.preset.requires_api_key and not key:
             self._open_settings()

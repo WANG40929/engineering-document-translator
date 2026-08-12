@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QIcon
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -29,10 +31,17 @@ from .i18n import I18n, get_language, normalize_language_code, tr
 from .providers import PRESETS, ProviderProfile, get_preset, new_profile
 
 
+class NoWheelComboBox(QComboBox):
+    """Prevent accidental value changes while scrolling the settings page."""
+
+    def wheelEvent(self, event):
+        event.ignore()
+
+
 class SettingsDialog(QDialog):
     """Compact settings window with a product introduction tab."""
 
-    connection_tested = Signal(bool, str, list)
+    connection_tested = Signal(str, bool, str, list)
 
     def __init__(self, config: AppConfig, api_keys: dict[str, str], save_key: bool, parent=None):
         super().__init__(parent)
@@ -50,6 +59,7 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(18, 18, 18, 14)
         layout.setSpacing(14)
         tabs = QTabWidget()
+        tabs.setObjectName("settingsTabs")
         self.profile_values = [item.to_dict() for item in config.profiles()]
         self.api_keys = dict(api_keys)
         self._current_profile_index = -1
@@ -64,6 +74,7 @@ class SettingsDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         save_button = buttons.button(QDialogButtonBox.Save)
+        self.save_button = save_button
         save_button.setText(tr("common.save"))
         save_button.setObjectName("saveButton")
         buttons.button(QDialogButtonBox.Cancel).setText(tr("common.cancel"))
@@ -71,32 +82,66 @@ class SettingsDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+        arrow_path = (Path(__file__).parent / "assets" / "chevron-down.svg").as_posix()
         self.setStyleSheet("""
-            QDialog { background: #f5f7fb; color: #152033; }
+            QDialog { background: #ffffff; color: #152033; }
             QWidget { font-size: 13px; }
-            QTabWidget::pane { background: white; border: 1px solid #e2e8f0; border-radius: 12px; top: -1px; }
-            QTabBar::tab { padding: 10px 20px; color: #718096; border-bottom: 2px solid transparent; }
+            QWidget#settingsPage, QScrollArea#settingsScroll,
+            QScrollArea#settingsScroll > QWidget > QWidget {
+                background: #ffffff;
+            }
+            QTabWidget::pane { background: #ffffff; border: 1px solid #dfe6f1; border-radius: 12px; top: -1px; }
+            QTabBar::tab { min-width: 72px; padding: 11px 20px; color: #667085; background: transparent; border-bottom: 2px solid transparent; }
+            QTabBar::tab:hover { color: #1f67e8; background: #f7f9fe; }
             QTabBar::tab:selected { color: #1f67e8; border-bottom-color: #1f67e8; font-weight: 700; }
-            QLineEdit, QSpinBox { min-height: 26px; padding: 6px 9px; background: white; border: 1px solid #d8e0eb; border-radius: 8px; }
-            QLineEdit:focus, QSpinBox:focus { border-color: #7d9dec; }
+            QLineEdit, QSpinBox, QComboBox {
+                min-height: 26px; padding: 6px 9px; background: #ffffff;
+                border: 1px solid #d5deea; border-radius: 8px;
+            }
+            QComboBox { padding-right: 28px; }
+            QComboBox::drop-down { width: 28px; border: none; background: transparent; }
+            QComboBox::down-arrow { image: url("__ARROW_PATH__"); width: 10px; height: 6px; }
+            QComboBox QAbstractItemView {
+                background: #ffffff; color: #152033; border: 1px solid #d5deea;
+                border-radius: 8px; selection-background-color: #eaf1ff;
+                selection-color: #174ea6; outline: 0; padding: 4px;
+            }
+            QLineEdit:hover, QSpinBox:hover, QComboBox:hover { border-color: #aebed4; }
+            QLineEdit:focus, QSpinBox:focus, QComboBox:focus { border-color: #5b84ed; }
+            QLineEdit[invalid="true"], QComboBox[invalid="true"] { border-color: #e5484d; background: #fffafa; }
+            QLineEdit:disabled { color: #8b96a8; background: #f6f8fb; }
             QPushButton { min-height: 28px; padding: 6px 15px; background: white; border: 1px solid #d7dee8; border-radius: 8px; }
             QPushButton:hover { border-color: #91a9e4; background: #f4f7ff; }
+            QPushButton:pressed { background: #eaf0ff; }
+            QPushButton:disabled { color: #a0a9b8; background: #f6f7f9; border-color: #e3e7ed; }
             QPushButton#saveButton { background:#1f67e8; color:white; border:none; font-weight:700; }
-        """)
+            QPushButton#saveButton:hover { background:#185bd4; }
+            QScrollBar:vertical { width: 10px; background: transparent; margin: 4px 2px; }
+            QScrollBar::handle:vertical { min-height: 28px; background: #cbd5e3; border-radius: 4px; }
+            QScrollBar::handle:vertical:hover { background: #aebbd0; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+        """.replace("__ARROW_PATH__", arrow_path))
 
     def _translation_tab(self, config, save_key):
         tab = QScrollArea()
+        tab.setObjectName("settingsScroll")
         tab.setWidgetResizable(True)
         tab.setFrameShape(QScrollArea.NoFrame)
+        tab.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         content = QWidget()
+        content.setObjectName("settingsPage")
+        content.setMinimumWidth(0)
         tab.setWidget(content)
         form = QFormLayout(content)
         form.setContentsMargins(22, 24, 22, 22)
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(14)
-        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        form.setRowWrapPolicy(QFormLayout.DontWrapRows)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         self.ui_language = QComboBox()
+        self._configure_combo(self.ui_language)
         language_catalog = I18n(config.ui_language)
         for code, label in language_catalog.language_choices():
             self.ui_language.addItem(label, code)
@@ -112,32 +157,43 @@ class SettingsDialog(QDialog):
         form.addRow(tr("language.interface"), language_box)
 
         self.profile_combo = QComboBox()
+        self._configure_combo(self.profile_combo)
         for item in self.profile_values:
             self.profile_combo.addItem(item["name"], item["id"])
         active_index = self.profile_combo.findData(config.active_provider_id)
         self.profile_combo.setCurrentIndex(max(0, active_index))
         add_profile = QPushButton(tr("settings.provider_add"))
         remove_profile = QPushButton(tr("settings.provider_remove"))
+        self.remove_profile_button = remove_profile
         add_profile.clicked.connect(self._add_profile)
         remove_profile.clicked.connect(self._remove_profile)
-        profile_row = QHBoxLayout()
-        profile_row.addWidget(self.profile_combo, 1)
-        profile_row.addWidget(add_profile)
-        profile_row.addWidget(remove_profile)
-        form.addRow(tr("settings.provider_profile"), profile_row)
+        profile_box = QVBoxLayout()
+        profile_box.setSpacing(7)
+        profile_box.addWidget(self.profile_combo)
+        profile_actions = QHBoxLayout()
+        profile_actions.setSpacing(7)
+        profile_actions.addStretch(1)
+        profile_actions.addWidget(add_profile)
+        profile_actions.addWidget(remove_profile)
+        profile_box.addLayout(profile_actions)
+        form.addRow(tr("settings.provider_profile"), profile_box)
 
-        self.provider_combo = QComboBox()
+        self.provider_combo = NoWheelComboBox()
+        self._configure_combo(self.provider_combo)
         for preset in PRESETS:
             self.provider_combo.addItem(preset.name, preset.id)
         self.provider_combo.currentIndexChanged.connect(self._provider_changed)
         form.addRow(tr("settings.provider"), self.provider_combo)
 
         self.profile_name_edit = QLineEdit()
+        self.profile_name_edit.textEdited.connect(self._profile_name_edited)
+        self.profile_name_edit.editingFinished.connect(self._profile_name_finished)
         form.addRow(tr("settings.profile_name"), self.profile_name_edit)
         self.base_url_edit = QLineEdit()
         self.base_url_edit.setPlaceholderText("https://…/chat/completions")
         form.addRow(tr("settings.base_url"), self.base_url_edit)
         self.model_edit = QComboBox()
+        self._configure_combo(self.model_edit)
         self.model_edit.setEditable(True)
         form.addRow(tr("settings.model"), self.model_edit)
 
@@ -145,6 +201,7 @@ class SettingsDialog(QDialog):
         self.key_edit.setEchoMode(QLineEdit.Password)
         self.key_edit.setPlaceholderText("sk-…")
         self.save_key = QCheckBox(tr("settings.save_key_windows"))
+        self.save_key.setToolTip(tr("settings.save_key_tooltip"))
         self.save_key.setChecked(save_key)
         key_box = QVBoxLayout()
         key_box.setSpacing(6)
@@ -153,16 +210,14 @@ class SettingsDialog(QDialog):
         form.addRow(tr("settings.api_key"), key_box)
 
         test_button = QPushButton(tr("settings.test_connection"))
+        test_button.setToolTip(tr("settings.test_connection_tooltip"))
         test_button.clicked.connect(self._test_connection)
         self.test_button = test_button
         form.addRow("", test_button)
 
         self.fallback_combo = QComboBox()
-        self.fallback_combo.addItem(tr("settings.no_fallback"), "")
-        for item in self.profile_values:
-            self.fallback_combo.addItem(item["name"], item["id"])
-        fallback_index = self.fallback_combo.findData(config.fallback_provider_id)
-        self.fallback_combo.setCurrentIndex(max(0, fallback_index))
+        self._configure_combo(self.fallback_combo)
+        self._refresh_fallback_combo(config.fallback_provider_id)
         form.addRow(tr("settings.fallback_provider"), self.fallback_combo)
 
         self.glossary_edit = QLineEdit(config.glossary_path)
@@ -186,6 +241,7 @@ class SettingsDialog(QDialog):
         options.addWidget(self.quality_review)
         options.addWidget(self.force_refresh)
         form.addRow(tr("settings.quality_options"), options)
+        self._style_form_labels(form)
         self.profile_combo.currentIndexChanged.connect(self._profile_changed)
         self.connection_tested.connect(self._connection_test_finished)
         self._load_profile(self.profile_combo.currentIndex())
@@ -205,6 +261,9 @@ class SettingsDialog(QDialog):
         })
         self.api_keys[item["id"]] = self.key_edit.text().strip()
         self.profile_combo.setItemText(index, item["name"])
+        fallback_index = self.fallback_combo.findData(item["id"])
+        if fallback_index >= 0:
+            self.fallback_combo.setItemText(fallback_index, item["name"])
 
     def _load_profile(self, index):
         if index < 0 or index >= len(self.profile_values):
@@ -222,28 +281,111 @@ class SettingsDialog(QDialog):
         self.model_edit.setCurrentText(item.model)
         self.key_edit.setText(self.api_keys.get(item.id, ""))
         self.key_edit.setEnabled(item.preset.requires_api_key)
+        self.key_edit.setPlaceholderText(
+            "sk-..." if item.preset.requires_api_key else tr("settings.api_key_not_required")
+        )
+        self._update_profile_controls()
 
     def _profile_changed(self, index):
         previous = self._current_profile_index
         if previous != index:
+            fallback_id = self.fallback_combo.currentData() or ""
             self._store_current_profile()
             self._load_profile(index)
+            self._refresh_fallback_combo(fallback_id)
 
     def _provider_changed(self):
         preset = get_preset(self.provider_combo.currentData())
-        self.profile_name_edit.setText(preset.name)
         self.base_url_edit.setText(preset.base_url)
         self.model_edit.clear()
         self.model_edit.setCurrentText(preset.default_model)
         self.key_edit.setEnabled(preset.requires_api_key)
+        self.key_edit.setPlaceholderText(
+            "sk-..." if preset.requires_api_key else tr("settings.api_key_not_required")
+        )
+        self._clear_validation_state()
+
+    def _profile_name_edited(self, text):
+        index = self._current_profile_index
+        name = text.strip()
+        if index < 0 or index >= len(self.profile_values) or not name:
+            return
+        self.profile_values[index]["name"] = name
+        self.profile_combo.setItemText(index, name)
+        fallback_index = self.fallback_combo.findData(self.profile_values[index]["id"])
+        if fallback_index >= 0:
+            self.fallback_combo.setItemText(fallback_index, name)
+
+    def _profile_name_finished(self):
+        fallback_id = self.fallback_combo.currentData() or ""
+        self._store_current_profile()
+        self._refresh_fallback_combo(fallback_id)
+
+    def _default_profile_name(self, number: int) -> str:
+        return tr("settings.default_profile_name", number=number)
+
+    def _next_default_profile_name(self) -> str:
+        existing = {str(item.get("name") or "").casefold() for item in self.profile_values}
+        number = len(self.profile_values) + 1
+        while self._default_profile_name(number).casefold() in existing:
+            number += 1
+        return self._default_profile_name(number)
+
+    def _refresh_fallback_combo(self, selected_id: str | None = None):
+        if not hasattr(self, "fallback_combo"):
+            return
+        if selected_id is None:
+            selected_id = self.fallback_combo.currentData() or ""
+        active_id = self.profile_combo.currentData() if hasattr(self, "profile_combo") else ""
+        self.fallback_combo.blockSignals(True)
+        self.fallback_combo.clear()
+        self.fallback_combo.addItem(tr("settings.no_fallback"), "")
+        for item in self.profile_values:
+            if item["id"] != active_id:
+                self.fallback_combo.addItem(item["name"], item["id"])
+        index = self.fallback_combo.findData(selected_id)
+        self.fallback_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.fallback_combo.blockSignals(False)
+
+    def _update_profile_controls(self):
+        self.remove_profile_button.setEnabled(len(self.profile_values) > 1)
+
+    @staticmethod
+    def _style_form_labels(form: QFormLayout):
+        """Keep translated labels readable without widening the whole dialog."""
+        for row in range(form.rowCount()):
+            item = form.itemAt(row, QFormLayout.LabelRole)
+            label = item.widget() if item else None
+            if isinstance(label, QLabel):
+                label.setWordWrap(True)
+                label.setMinimumWidth(120)
+                label.setMaximumWidth(150)
+                label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+
+    @staticmethod
+    def _configure_combo(combo: QComboBox):
+        """Let long translated choices elide inside the available field width."""
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(14)
+        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
     def _add_profile(self):
         self._store_current_profile()
+        if len(self.profile_values) == 1:
+            first = self.profile_values[0]
+            preset = get_preset(str(first.get("provider") or ""))
+            if first.get("id") == "deepseek-default" and first.get("name") == preset.name:
+                first["name"] = self._default_profile_name(1)
+                self.profile_combo.setItemText(0, first["name"])
+                if self._current_profile_index == 0:
+                    self.profile_name_edit.setText(first["name"])
         item = new_profile("deepseek").to_dict()
+        item["name"] = self._next_default_profile_name()
         self.profile_values.append(item)
         self.profile_combo.addItem(item["name"], item["id"])
-        self.fallback_combo.addItem(item["name"], item["id"])
         self.profile_combo.setCurrentIndex(len(self.profile_values) - 1)
+        self._refresh_fallback_combo()
+        self._update_profile_controls()
 
     def _remove_profile(self):
         if len(self.profile_values) <= 1:
@@ -259,8 +401,63 @@ class SettingsDialog(QDialog):
             self.fallback_combo.removeItem(fallback_index)
         self._current_profile_index = -1
         self._load_profile(self.profile_combo.currentIndex())
+        self._refresh_fallback_combo()
+        self._update_profile_controls()
+
+    @staticmethod
+    def _set_invalid(widget, invalid: bool):
+        widget.setProperty("invalid", invalid)
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
+
+    def _clear_validation_state(self):
+        self._set_invalid(self.base_url_edit, False)
+        self._set_invalid(self.model_edit, False)
+        self._set_invalid(self.key_edit, False)
+
+    def _validate_current_profile(self) -> bool:
+        self._clear_validation_state()
+        preset = get_preset(self.provider_combo.currentData())
+        base_url = self.base_url_edit.text().strip()
+        parts = urlsplit(base_url)
+        if not base_url or parts.scheme not in {"http", "https"} or not parts.netloc:
+            self._set_invalid(self.base_url_edit, True)
+            self.base_url_edit.setFocus()
+            QMessageBox.warning(
+                self,
+                tr("settings.validation_title"),
+                tr("settings.validation_base_url"),
+            )
+            return False
+        if preset.api_style != "azure" and not self.model_edit.currentText().strip():
+            self._set_invalid(self.model_edit, True)
+            self.model_edit.setFocus()
+            QMessageBox.warning(
+                self,
+                tr("settings.validation_title"),
+                tr("settings.validation_model"),
+            )
+            return False
+        if preset.requires_api_key and not self.key_edit.text().strip():
+            self._set_invalid(self.key_edit, True)
+            self.key_edit.setFocus()
+            QMessageBox.warning(
+                self,
+                tr("settings.validation_title"),
+                tr("settings.validation_api_key"),
+            )
+            return False
+        return True
+
+    def accept(self):
+        if not self._validate_current_profile():
+            return
+        self._store_current_profile()
+        super().accept()
 
     def _test_connection(self):
+        if not self._validate_current_profile():
+            return
         self._store_current_profile()
         item = ProviderProfile.from_dict(self.profile_values[self.profile_combo.currentIndex()])
         key = self.api_keys.get(item.id, "")
@@ -271,19 +468,18 @@ class SettingsDialog(QDialog):
             try:
                 from .deepseek import DeepSeekTranslator
                 translator = DeepSeekTranslator.from_profile(item, key, timeout=30, quality_review=False)
-                ok, message = translator.test_connection()
-                models = translator.list_models() if ok else []
-                self.connection_tested.emit(ok, message, models)
+                ok, message, models = translator.test_connection_details()
+                self.connection_tested.emit(item.id, ok, message, models)
             except Exception as exc:
-                self.connection_tested.emit(False, str(exc), [])
+                self.connection_tested.emit(item.id, False, str(exc), [])
 
         import threading
         threading.Thread(target=worker, daemon=True).start()
 
-    def _connection_test_finished(self, ok, message, models):
+    def _connection_test_finished(self, profile_id, ok, message, models):
         self.test_button.setEnabled(True)
         self.test_button.setText(tr("settings.test_connection"))
-        if ok and models:
+        if ok and models and self.profile_combo.currentData() == profile_id:
             current = self.model_edit.currentText()
             self.model_edit.clear()
             self.model_edit.addItems(models)
@@ -294,13 +490,16 @@ class SettingsDialog(QDialog):
 
     def _advanced_tab(self, config):
         tab = QWidget()
+        tab.setObjectName("settingsPage")
         form = QFormLayout(tab)
         form.setContentsMargins(22, 24, 22, 22)
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(14)
-        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        form.setRowWrapPolicy(QFormLayout.DontWrapRows)
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         self.pdf_mode = QComboBox()
+        self._configure_combo(self.pdf_mode)
         self.pdf_mode.addItem(tr("settings.pdf_mode_auto"), "auto")
         self.pdf_mode.addItem(tr("settings.pdf_mode_smart"), "smart")
         self.pdf_mode.addItem(tr("settings.pdf_mode_strict"), "strict")
@@ -310,6 +509,7 @@ class SettingsDialog(QDialog):
         form.addRow(tr("settings.pdf_mode"), self.pdf_mode)
 
         self.pdf_output = QComboBox()
+        self._configure_combo(self.pdf_output)
         self.pdf_output.addItem(tr("settings.pdf_output_mono"), "mono")
         self.pdf_output.addItem(tr("settings.pdf_output_dual"), "dual")
         self.pdf_output.addItem(tr("settings.pdf_output_both"), "both")
@@ -332,12 +532,14 @@ class SettingsDialog(QDialog):
         form.addRow("", backend_note)
 
         self.batch_size = QSpinBox()
+        self.batch_size.setButtonSymbols(QSpinBox.NoButtons)
         self.batch_size.setRange(1, 100)
         self.batch_size.setValue(config.batch_size)
         self.batch_size.setSuffix(tr("common.segments_per_batch_suffix"))
         form.addRow(tr("settings.batch_size"), self.batch_size)
 
         self.timeout = QSpinBox()
+        self.timeout.setButtonSymbols(QSpinBox.NoButtons)
         self.timeout.setRange(30, 600)
         self.timeout.setValue(config.request_timeout)
         self.timeout.setSuffix(tr("common.seconds_suffix"))
@@ -349,10 +551,12 @@ class SettingsDialog(QDialog):
         cache.setWordWrap(True)
         cache.setStyleSheet("color:#667085; line-height:1.45;")
         form.addRow(tr("settings.translation_cache"), cache)
+        self._style_form_labels(form)
         return tab
 
     def _about_tab(self, icon_path):
         tab = QWidget()
+        tab.setObjectName("settingsPage")
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(28, 26, 28, 24)
         layout.setSpacing(12)
@@ -364,6 +568,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(icon)
         title = QLabel(tr("app.name"))
         title.setAlignment(Qt.AlignCenter)
+        title.setWordWrap(True)
         title.setStyleSheet("font-size:20px; font-weight:700; color:#172033;")
         layout.addWidget(title)
         version = QLabel(tr("about.product_line", version=__version__))
@@ -421,13 +626,17 @@ class SettingsDialog(QDialog):
 
     def values(self) -> dict:
         self._store_current_profile()
+        active_id = self.profile_combo.currentData()
+        fallback_id = self.fallback_combo.currentData() or ""
+        if fallback_id == active_id:
+            fallback_id = ""
         return {
             "ui_language": self.ui_language.currentData(),
             "api_keys": dict(self.api_keys),
             "save_key": self.save_key.isChecked(),
             "provider_profiles": list(self.profile_values),
-            "active_provider_id": self.profile_combo.currentData(),
-            "fallback_provider_id": self.fallback_combo.currentData() or "",
+            "active_provider_id": active_id,
+            "fallback_provider_id": fallback_id,
             "glossary_path": self.glossary_edit.text().strip(),
             "pure_target_language": self.pure_target.isChecked(),
             "quality_review": self.quality_review.isChecked(),

@@ -659,16 +659,20 @@ class DeepSeekTranslator:
         )
 
     def test_connection(self) -> tuple[bool, str]:
+        ok, message, _models = self.test_connection_details()
+        return ok, message
+
+    def test_connection_details(self) -> tuple[bool, str, list[str]]:
         try:
             models = self.list_models()
             if models:
-                return True, f"{len(models)} models"
+                return True, f"{len(models)} models", models
             # Providers without a model-list endpoint are verified with one
             # tiny structured translation request.
             self._request([{"id": 0, "text": "OK"}])
-            return True, "OK"
+            return True, "OK", []
         except Exception as exc:
-            return False, self._redact_error(exc)
+            return False, self._redact_error(exc), []
 
     def _request_resilient(
         self,
